@@ -1,0 +1,4 @@
+gdbmfile - Key/value lookup module using a GDBM database.
+
+Tries each input str value as a key and returns the stored reply
+attributes plus int=1 on hit, or int=0 on miss.

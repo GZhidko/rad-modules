@@ -1,0 +1,69 @@
+============================= etc/openradius/subdicts/dict.internal
+
+$add field 66 crypted-password
+
+============================= configuration:
+
+interface (name="GDBMFile",
+        sendattr="str",
+        prog="gdbmauth -f путь-к-файл", # можно добавить -d для отладки
+        flags=Ascii + Short-Attr + Named-Const,
+        timeout=9),
+
+============================= behaviour:
+
+# Logger(str = GLDN-Log-Line . " FAILURE:AtlantAuth")
+REQ:GLDN-Log-Line = GLDN-Log-Line . " FAILURE:AtlantAuth try GDBMAuth: ",
+
+delall REQ:str, delall REP:int,
+str = User-Name . '/' . NAS-IP-Address,
+str = User-Name,
+str = User-Name beforefirst "@" . '/' . NAS-IP-Address,
+str = User-Name beforefirst "@",
+
+GDBMFile 0,
+
+temp-int-1 = F:int, del REP:F:int,
+
+REQ:temp-int-1 == 1 and (
+  User-Password and (
+    # PAP and clear-password
+    clear-password and
+    clear-password == User-Password and (
+      Logger(str = GLDN-Log-Line . "authenticated (PAP/clear-password)"),
+      accept
+    ),
+    # PAP and crypted-password
+    crypted-password and (
+      (User-Password unixcrypt (2 firstof crypted-password)) == crypted-password
+    ) and (
+      Logger(str = GLDN-Log-Line . "authenticated (PAP/crypted-password)"),
+      accept
+    ),
+    # PAP: password not found.
+    Logger(str = GLDN-Log-Line . "rejected (PAP/nopassword)"),
+    reject
+  ),
+  CHAP-Password and (
+    # CHAP and clear-password
+    clear-password and (
+      16 lastof CHAP-Password ==
+      md5 (1 firstof CHAP-Password . clear-password . CHAP-Challenge) and (
+        Logger(str = GLDN-Log-Line . "authenticated (CHAP)"),
+        accept
+      ),
+      Logger(str = GLDN-Log-Line . "rejected (CHAP)"),
+      Reply-Message = "CHAP authentication failed. Access denied.",
+      reject
+    ),
+    Logger(str = GLDN-Log-Line . "rejected (CHAP/nopassword)"),
+    reject
+  ),
+  Logger(str = GLDN-Log-Line . "rejected (CHAP? PAP?)"),
+  reject
+),
+REQ:temp-int-1 == 1 or (
+  Logger(str = GLDN-Log-Line . "rejected (nothing found)"),
+  Reply-Message = "Access denied.",
+  reject
+),

@@ -1,0 +1,14 @@
+Build
+-----
+./autogen.sh
+./configure
+./make
+
+Test
+----
+cat tests/set.req | ./redisgw -s 127.0.0.1
+cat tests/get.req | ./redisgw -s 127.0.0.1
+
+Make dist tarball
+-----------------
+make dist-gzip

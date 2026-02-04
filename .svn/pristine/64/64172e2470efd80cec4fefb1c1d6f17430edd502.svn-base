@@ -1,0 +1,198 @@
+*** tools/radclient/radclient.c%	Mon Nov 21 17:31:59 2005
+--- tools/radclient/radclient.c	Wed Sep  2 02:16:45 2009
+***************
+*** 190,195 ****
+--- 190,196 ----
+  
+  	META_SPC *ds_ground, *ds_rad_pkt;
+  	META_ITEM *di_int, *di_rad_code, *di_rad_id, *di_rad_len, *di_rad_auth;
++ 	META_ITEM *di_msg_auth; 
+  	META_ITEM *di_user_name, *di_user_pass, *di_chap_pass, *di_chap_chal; 
+  	META_ITEM *di_nas_ip, *di_acct_dly, *di_query_id, *di_tgt_srv;
+  	META_VAL *dv_auth_req, *dv_acct_req;
+***************
+*** 325,333 ****
+  
+  void sock_handle_read(struct radcfg *c, time_t t)
+  {
+! 	static char pkt[C_MAX_PKTSIZE], chkauth[16];
+  	struct sockaddr_in sin;
+! 	META_AV *head, *tail, *av, *rad_auth;
+  	int n, got, rad_code, rad_id, rad_len;
+  	struct radreq *r;
+  	md5_state_t md5ctx;
+--- 326,334 ----
+  
+  void sock_handle_read(struct radcfg *c, time_t t)
+  {
+! 	static char pkt[C_MAX_PKTSIZE], dummy[16], chkauth[16], chkmauth[16];
+  	struct sockaddr_in sin;
+! 	META_AV *head, *tail, *av, *rad_auth, *msgauthav;
+  	int n, got, rad_code, rad_id, rad_len;
+  	struct radreq *r;
+  	md5_state_t md5ctx;
+***************
+*** 363,374 ****
+--- 364,377 ----
+  	/* Gather data */
+  
+  	rad_code = rad_id = rad_len = 0; rad_auth = 0;	/* 'dumb' compiler */
++ 	msgauthav = 0;
+  	got = 0;
+  	for(av = head; av; av = av->next) {
+  	    if (av->i == c->di_rad_code) rad_code = av->l, got |= A_RAD_CODE;
+  	    else if (av->i == c->di_rad_id) rad_id = av->l, got |= A_RAD_ID;
+  	    else if (av->i == c->di_rad_len) rad_len = av->l, got |= A_RAD_LEN;
+  	    else if (av->i == c->di_rad_auth) rad_auth = av, got |= A_RAD_AUTH;
++ 	    else if (av->i == c->di_msg_auth) msgauthav = av;
+  	}
+  	if (got != (A_RAD_CODE | A_RAD_ID | A_RAD_LEN | A_RAD_AUTH)) {
+  	    msg(F_RECV, L_ERR, "Dropping answer: Missing response elements!\n");
+***************
+*** 431,436 ****
+--- 434,459 ----
+  	msg(F_RECV, L_NOTICE, "Response, ID %d matches request in slot %d.\n",
+  	    rad_id, n);
+  
++ 	if (msgauthav) {
++ 	    /* Got Message-Authenticator in response */
++ 	    memcpy(chkmauth, msgauthav->p, sizeof(chkmauth));
++ 	    memset(msgauthav->p, 0, 16);
++ 	    memcpy(chkauth, rad_auth->p, sizeof(chkauth));
++ 	    memcpy(rad_auth->p, r->auth, sizeof(r->auth));
++ 	    hmac_md5(dummy, pkt, rad_len, r->srv->secret, r->srv->secretlen);
++ 	    memcpy(rad_auth->p, chkauth, sizeof(chkauth));
++ 	    if (memcmp(chkmauth, dummy, sizeof(dummy))) {
++ 	        msg(F_RECV, L_ERR, "Dropping answer: message authenticator mismatch!\n");
++ 	        if (msg_thresh[F_RECV] >= L_DEBUG) {
++ 		    msg_line(F_RECV, "Expected authenticator:\n");
++ 		    hexdump(dummy, sizeof(dummy));
++ 		    msg_line(F_RECV, "Received authenticator:\n");
++ 		    hexdump(chkmauth, sizeof(chkmauth));
++ 	        }
++ 	        return;
++ 	    }
++ 	}
++ 
+  	/* See if we want to check the code as well */
+  
+  #ifdef SPECIAL_PRIMARY
+***************
+*** 463,470 ****
+  int new_req(struct radcfg *c, time_t t, struct radquery *qry,
+  	    struct radsrv *srv)
+  {
+  	struct radreq *r;
+! 	META_AV *av, *head, *tail, *tree;
+  	META_ORD n;
+  	md5_state_t md5ctx;
+  	int ret;
+--- 486,494 ----
+  int new_req(struct radcfg *c, time_t t, struct radquery *qry,
+  	    struct radsrv *srv)
+  {
++ 	static char dummy[16];
+  	struct radreq *r;
+! 	META_AV *av, *head, *tail, *tree, *msgauthav;
+  	META_ORD n;
+  	md5_state_t md5ctx;
+  	int ret;
+***************
+*** 549,554 ****
+--- 573,590 ----
+  		meta_addav(&head, &tail, 0, 0, av);
+  	}
+  
++ 	/* Add Message-Authenticator */
++ 	if (qry->acct) {
++ 		msgauthav = 0;
++ 	} else {
++ 		msgauthav = av = safe_malloc(sizeof(META_AV));
++ 		memset(av, 0, sizeof(META_AV));
++ 		av->i = c->di_msg_auth;
++ 		av->p = dummy; av->l = sizeof(dummy);
++ 		memset(av->p, 0, av->l);
++ 		meta_addav(&head, &tail, 0, 0, av);
++ 	}
++ 
+  	/* Show request list */
+  
+  	if (msg_thresh[F_SEND] >= L_NOTICE) {
+***************
+*** 562,567 ****
+--- 598,630 ----
+  	meta_buildtree(head, &tree, c->ds_ground);
+  	r->pktlen = meta_encode(c->ds_ground, r->pkt, C_MAX_PKTSIZE, tree, 0);
+  
++ 	if (r->pktlen == -1) {
++ 		/* Skip if encoding failed for whatever reason */
++ 		msg(F_SEND, L_ERR, "ERROR: Could not build packet!\n");
++ 		r->pktlen = 0;
++ 		ret = -1;
++ 	} else {
++ 
++ 		/* Build Message-Authenticator */
++ 		if (msgauthav) {
++ 			hmac_md5(av->treeitem->encp, r->pkt, r->pktlen,
++ 				srv->secret, srv->secretlen);
++ 		}
++ 
++ 		/* If we're doing accounting and we didn't already have
++ 		   a signature, sign the packet now and remember the signature
++ 		   in r->auth so that we can check the response. */
++ 
++ 		if (qry->acct && !qry->given_auth) {
++ 			md5_init(&md5ctx);
++ 			md5_append(&md5ctx, r->pkt, r->pktlen);
++ 			md5_append(&md5ctx, srv->secret, srv->secretlen);
++ 			md5_finish(&md5ctx, r->auth);
++ 			memcpy(r->pkt + c->di_rad_auth->val_ofs, r->auth, 
++ 				c->di_rad_auth->val_size);
++ 		}
++ 	}
++ 
+  	/* Free temporary tree and list parts */
+  
+  	meta_freeavtree(tree); tree = 0;	/* Free tree */
+***************
+*** 574,600 ****
+  		qry->reqtail->next = 0;
+  	}					/* Free list after qry part */
+  
+- 	/* Skip if encoding failed for whatever reason */
+- 
+- 	if (r->pktlen == -1) {
+- 		msg(F_SEND, L_ERR, "ERROR: Could not build packet!\n");
+- 		r->pktlen = 0;
+- 		return -1;
+- 	}
+- 
+- 	/* If we're doing accounting and we didn't already have a signature, 
+- 	   sign the packet now and remember the signature in r->auth so that we
+- 	   can check the response. */
+- 
+- 	if (qry->acct && !qry->given_auth) {
+- 		md5_init(&md5ctx);
+- 		md5_append(&md5ctx, r->pkt, r->pktlen);
+- 		md5_append(&md5ctx, srv->secret, srv->secretlen);
+- 		md5_finish(&md5ctx, r->auth);
+- 		memcpy(r->pkt + c->di_rad_auth->val_ofs, r->auth, 
+- 		       c->di_rad_auth->val_size);
+- 	}
+- 
+  	return ret;
+  }
+  
+--- 637,642 ----
+***************
+*** 1101,1106 ****
+--- 1143,1151 ----
+  	    !(c->di_rad_auth  = meta_getitembyname(c->m, c->ds_rad_pkt,
+  						   "RAD-Authenticator", 
+  						   META_VND_ANY)) ||
++ 	    !(c->di_msg_auth = meta_getitembyname(c->m, 0, 
++ 			    			   "Message-Authenticator", 
++ 						   META_VND_ANY)) ||
+  	    !(c->di_user_name = meta_getitembyname(c->m, 0, 
+  			    			   "User-Name", 
+  						   META_VND_ANY)) ||

@@ -1,0 +1,25 @@
+dnl
+dnl Configure script pattern for multi_radclient OpenRADIUS module.
+dnl
+
+dnl Init autoconf
+AC_INIT([multi_radclient], [0.0.13], [am@rol.ru, fandorin@rol.ru])
+
+dnl Init automake
+AM_INIT_AUTOMAKE
+
+dnl Checks for programs.
+AC_PROG_CC
+AC_PROG_LEX
+AC_PROG_YACC
+AC_PROG_INSTALL
+AC_PROG_MAKE_SET
+
+dnl Checks for header files.
+AC_HEADER_STDC
+
+dnl Output gathered data
+AC_OUTPUT([Makefile])
+
+
+

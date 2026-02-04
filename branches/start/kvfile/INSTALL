@@ -1,0 +1,9 @@
+Un-gzip, untar and build from source tarball:
+
+gzip -dc afile-X.X.X.tar.gz | tar xvf -
+cd afile-X.X.X
+./configure && make && make install
+
+Now configure your openradiusd to make use of the afile instead of stock
+ascfile module by editing the "configuration" file. Restart openradisud
+daemon and watch its log file for possible error messages.

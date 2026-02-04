@@ -1,0 +1,337 @@
+#!/usr/bin/perl -w
+#
+# MSCHAP - OpenRADIUS module for authenticating MSCHAP requests
+#          and generating MPPE Encryption keys
+#
+# Usage: mschap [-d] [-n - rest of arglist interpreted as args for ntlm_auth]
+#  	 mschap -h
+#
+# -d increases verbosity on stderr and allows module to run standalone
+#
+# This module verifies a given MSCHAPv2 challenge and response against a
+# given password or against a domain controller using Samba's ntlm_auth
+# helper program. 
+#
+# It accepts the username, challenge, peer challenge and response as 4 'str'
+# attributes, plus optionally a 'clear-password' for verification (required if
+# the -n option is not given) and returns an 'int' containing the
+# authentication result. 
+#
+# If successful, it also returns three 'str' attributes containing the
+# authenticator response and MPPE master keys, formatted properly into 32 byte
+# values, which must be encrypted using the Tunnel-Password encryption scheme
+# before sending them to the client. See the example behaviour file for
+# details.
+#
+# Whenever a clear-password attribute is supplied, verification is 
+# done locally, regardless of whether the ntlm_auth helper was enabled
+# using -n. If no ntlm_auth helper was started, failure to provide a
+# clear-password attribute will result in an authentication failure.
+#
+# The meaning of the attributes accepted by the module is as follows:
+#
+#    str=Username
+#    str=MSCHAPv2 Challenge
+#    str=MSCHAPv2 Peer Challenge
+#    str=MSCHAPv2 Response
+#    str=md4hash		(if hash verification is desired)
+#    clear-password=Password	(if local verification is desired)
+#
+# The returned parameters are:
+#
+#    str=Authenticator Response (for peer to verify)
+#    str=MPPE receive key
+#    str=MPPE send key
+#    int=0 (failure) >0 (success)
+#
+# Author: David Madsen davidm@et.byu.edu
+#
+# History:
+#   2004/2/26 - DM  - Initial file creation
+#   2006/3/31 - EvB - Cleanup to remove site specific DB auth and add ntlm_auth
+#		    - Made module interface a bit more robust 
+#		    - Added ntlm_auth feature to authenticate against a Windows
+#		      domain via Samba's winbindd
+
+use Getopt::Long;
+
+use Digest::MD4;
+use Digest::SHA1;
+use Crypt::DES;
+use Time::HiRes qw(time);
+
+# Space, Vendor, Number tuple constants for the attributes used by this module
+
+$INT	  = "\x00\x00\x00\x64\x80\x00\x00\x00\x00\x00\x00\x01";
+$STR	  = "\x00\x00\x00\x64\x80\x00\x00\x00\x00\x00\x00\x04";
+$CLEARPW  = "\x00\x00\x00\x64\x80\x00\x00\x00\x00\x00\x00\x3d";
+
+# Boilerplate OR interface stuff
+
+use bytes;			# no unicode text processing, just octets
+binmode STDIN, ":raw";		# don't mangle CR/LF on I/O 
+$| = 1; 
+our $STAT_START;
+
+# Handle options
+
+Getopt::Long::Configure("bundling");
+GetOptions("h"  => \$usage,
+           "d+" => \$DEBUG,
+           "s=s" => \$stat_file,
+           "i=i" => \$stat_interval);
+
+if ($USAGE) {
+    die("Usage: mschap [-d] [-s statfile] [-i minutes]\n");
+}
+
+# Check that we're running under OpenRADIUS, binary interface version 2
+
+unless ($DEBUG ||
+        $ENV{'RADIUSINTERFACEVERSION'} &&
+        $ENV{'RADIUSINTERFACEVERSION'} == 2) {
+        die "radsql: ERROR: not running under OpenRADIUS, binary interface v2!\n";
+}
+
+my $stats_lib = $0;
+$stats_lib =~ s{/[^/]+$}{};
+require "$stats_lib/../stats.pl";
+stats_init('mschap', $stat_file, $stat_interval);
+
+
+# ROUTINES
+
+sub strval($) {
+  my $str = shift;
+  my $len = length($str);
+  return pack('Na*x![N]', $len, $str);
+}
+
+sub intval($) {
+  my $int = shift;
+  return pack('NN', 4, $int);
+}
+
+sub str_to_key {
+  my $str = shift;
+  my $pack_str = unpack("B*", $str);
+  $pack_str =~ s/(.......)/$1)1/g;
+  $pack_str =~ s/\)//g;
+  return pack("B*", $pack_str);
+}
+
+sub md4 {
+  $md4 = new Digest::MD4;
+  $md4->add(@_);
+  return $md4->digest();
+}
+
+sub respond {
+  my $message = shift;
+  $DEBUG and print STDERR "  message:    ". unpack("H*", $message)."\n";
+  print "\xde\xad\xbe\xef" . pack('N', length($message) + 8) . $message;
+  if (defined $STAT_START) {
+    my $elapsed_ms = int((time() - $STAT_START) * 1000);
+    stats_record($elapsed_ms);
+    $STAT_START = undef;
+  }
+}
+  
+
+# MAIN
+
+my $header;
+my $message;
+REQ: while(sysread(STDIN, $header, 8) == 8) {
+
+  (my $magic, my $length) = unpack('N2', $header);
+  if ($magic != 0xbeefdead || $length < 8) { 
+    die("Bad header: " . unpack('H*', $header) . "!\n"); 
+  }
+  $length -= 8;
+
+  # Read rest of message
+
+  if (sysread(STDIN, $message, $length) != $length) { 
+    die("read($length): $!\n"); 
+  }
+  $STAT_START = time();
+
+  # Walk through the message
+
+  undef @str;
+  undef $clearpw; 
+  for(my $ofs = 0; $ofs < $length; $ofs += $skiplen) {
+
+    # Decode next pair into sva (space, vendor, attribute), length, value tuple
+
+    (my $sva, my $len) = unpack('@' . $ofs . 'a[12] N', $message);
+    $ofs += 16;
+    my $val = unpack('@' . $ofs . 'a[' . $len . ']', $message);
+    $skiplen = ($len + 3) & ~3;
+
+    $DEBUG and print STDERR unpack('H*', $sva) . "\t" . 
+    			     unpack('H*', $val) . "\n";
+
+    # Get the values of the attributes we want into variables
+
+    if ($sva eq $STR)	      { push @str, $val; }
+    elsif ($sva eq $CLEARPW)  { $clearpw = $val; } 
+  }
+  $message = '';
+
+  # Off we go
+
+  $username = $str[0];
+  $authenticatorchallenge = $str[1];
+  $peerchallenge = $str[2];
+  $response = $str[3];
+  $md4pass = $str[4];
+
+  unless (defined $clearpw || $md4pass) {
+    $DEBUG and print STDERR "mschap: No password/md4hash available\n";
+    $message .= $INT . intval(0);
+    respond($message);
+    next REQ;
+  }
+
+  if (defined $clearpw) {
+    $unipass = $clearpw;
+    $unipass =~ s/(.)/$1\0/g;
+    $md4pass = md4($unipass);
+  } else {
+    $md4pass = pack("H*", $md4pass);
+  }
+
+  if ($DEBUG) {
+	  print STDERR "mschap:\n";
+	  print STDERR "  username:     $username\n";
+	  if (defined $clearpw) {
+          	print STDERR "  password:     $clearpw\n";
+	  	print STDERR "  (uni. be16):  ". unpack("H*", $unipass)."\n";
+	  }
+	  print STDERR "  (md4 (NT)):   ". unpack("H*", $md4pass)."\n";
+	  print STDERR "  challenge:    ". unpack("H*", $authenticatorchallenge)."\n";
+	  print STDERR "  peerchal:     ". unpack("H*", $peerchallenge)."\n";
+	  print STDERR "  response:     ". unpack("H*", $response)."\n";
+	  print STDERR "  --------\n";
+
+  }
+
+  # Calculate the LM challenge from auth and peer nonces and the username
+
+  $sha1 = Digest::SHA1->new;
+  $sha1->add($peerchallenge);
+  $sha1->add($authenticatorchallenge);
+  $sha1->add($username);
+  $challenge = $sha1->digest;
+  $challenge = substr($challenge, 0, 8);
+
+  if ($DEBUG) {
+	  print STDERR "  LM challenge: ".unpack("H*", $challenge)."\n";
+  }
+
+  # Calculate the peer response for verification
+
+  $md4pack = $md4pass . pack("x5");
+  $des1 =  substr($md4pack, 0 , 7);
+  $des2 =  substr($md4pack, 7 , 7);
+  $des3 =  substr($md4pack, 14, 7);
+
+  if ($DEBUG) {
+	  print STDERR "  des1-raw: ".unpack("H*", $des1)."\n";
+	  print STDERR "  des1:     ".unpack("H*", str_to_key($des1))."\n";
+	  print STDERR "  des2-raw: ".unpack("H*", $des2)."\n";
+	  print STDERR "  des2:     ".unpack("H*", str_to_key($des2))."\n";
+	  print STDERR "  des3-raw: ".unpack("H*", $des3)."\n";
+	  print STDERR "  des3:     ".unpack("H*", str_to_key($des3))."\n";
+  }
+
+  $cipher1 = new Crypt::DES str_to_key($des1);
+  $cipher2 = new Crypt::DES str_to_key($des2);
+  $cipher3 = new Crypt::DES str_to_key($des3);
+  $ciphertext1 = $cipher1->encrypt($challenge);
+  $ciphertext2 = $cipher2->encrypt($challenge);
+  $ciphertext3 = $cipher3->encrypt($challenge);
+
+  $challenge_response = $ciphertext1.$ciphertext2.$ciphertext3;
+			  
+  $magic1 = pack("H*", "4D616769632073657276657220746F20636C69656E74207369676E696E6720636F6E7374616E74");
+  $magic2 = pack("H*", "50616420746F206D616B6520697420646F206D6F7265207468616E206F6E6520697465726174696F6E");
+
+  # Calculate our authenticator response
+
+  $md4passhash = md4($md4pass);
+
+  $sha2 = Digest::SHA1->new;
+  $sha2->add($md4passhash);
+  $sha2->add($challenge_response);
+  $sha2->add($magic1);
+  $digest = $sha2->digest;
+
+  $sha2 = Digest::SHA1->new;
+  $sha2->add($digest);
+  $sha2->add($challenge);
+  $sha2->add($magic2);
+  $authenticator_response = $sha2->digest;
+
+  if ($DEBUG) {
+	  print STDERR "  calculated response:    " . unpack("H*", $challenge_response)."\n";
+	  print STDERR "  received response:      " . unpack("H*", $response)."\n";
+	  print STDERR "  authresponse: " . unpack("H*", $authenticator_response) . "\n";
+	  print STDERR "  --------\n";
+  }
+
+  # Derive MPPE keying material
+
+  $key_magic1 = pack("H*", "5468697320697320746865204D505045204D6173746572204B6579");
+  $key_magic2 = pack("H*", "4F6E2074686520636C69656E7420736964652C2074686973206973207468652073656E64206B65793B206F6E207468652073657276657220736964652C206974206973207468652072656365697665206B65792E");
+  $key_magic3 = pack("H*", "4F6E2074686520636C69656E7420736964652C2074686973206973207468652072656365697665206B65793B206F6E207468652073657276657220736964652C206974206973207468652073656E64206B65792E");
+  $sha_pad1 = pack("H*", "00000000000000000000000000000000000000000000000000000000000000000000000000000000");
+  $sha_pad2 = pack("H*", "F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2F2");
+
+  $mppekeypasshash = md4(substr($md4pass,0,16));
+  $sha2 = Digest::SHA1->new;
+  $sha2->add($mppekeypasshash);
+  $sha2->add($challenge_response);
+  $sha2->add($key_magic1);
+  $masterkey = $sha2->digest;
+  $masterkey = substr($masterkey,0,16);
+
+  if ($DEBUG) {
+	  print STDERR "  mppe_pass_hash:   " .unpack("H*", $mppekeypasshash)."\n";
+	  print STDERR "  masterkey:        " .unpack("H*", $masterkey)."\n";
+  }
+
+  $sha2 = Digest::SHA1->new;
+  $sha2->add($masterkey);
+  $sha2->add($sha_pad1);
+  $sha2->add($key_magic3);
+  $sha2->add($sha_pad2);
+  $mastersendkey = $sha2->digest;
+  $mastersendkey = substr($mastersendkey,0,16);
+
+  $sha2 = Digest::SHA1->new;
+  $sha2->add($masterkey);
+  $sha2->add($sha_pad1);
+  $sha2->add($key_magic2);
+  $sha2->add($sha_pad2);
+  $masterreceivekey = $sha2->digest;
+  $masterreceivekey = substr($masterreceivekey,0,16);
+
+  if ($DEBUG) {
+	  print STDERR "  masterreceivekey: ".unpack("H*", $masterreceivekey)."\n";
+	  print STDERR "  mastersendkey:    ".unpack("H*", $mastersendkey)."\n";
+  }
+
+  # Respond
+
+  $message .= $INT . intval($response eq $challenge_response);
+  $message .= $STR . strval($authenticator_response);
+  $message .= $STR . strval($masterreceivekey);
+  $message .= $STR . strval($mastersendkey);
+
+  respond($message);
+}
+
+# vim:softtabstop=2:sw=2

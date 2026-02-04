@@ -1,0 +1,4 @@
+h323date - Parse H.323 date strings to epoch seconds.
+
+Reads a date string from str, converts it to a Unix timestamp, and
+returns it as int.

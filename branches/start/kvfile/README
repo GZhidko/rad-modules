@@ -1,0 +1,11 @@
+The OpenRADIUS ascfile module replacement
+
+This is a drop-in replacement module for stock ascfile script
+shipped with OpenRADIUS (http://www.openradius.org). The original
+implementation might be somewhat slower, and, due to Perl'ish nature,
+may have larger memory footprint.
+
+All interfaces of the afile module are backward compatible with original
+ascfile.
+
+Comments welcome at am@rol.ru.

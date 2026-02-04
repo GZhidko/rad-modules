@@ -1,0 +1,48 @@
+== Путь следования пакета
+
+== Общая идея:
+
+(чтение)
+Dispatcher::dispatch ->
+AbstractDataAcceptor::accept_data ->
+[какие-то внутренние обработчики] ->
+OutputBuffer::accept_data ->
+Dispatcher::dispatch
+(запись)
+
+== Реализации:
+
+= Чтение данных из радиуса (stdin; fd=0)
+
+(чтение)
+Dispatcher::dispatch ->
+InputBuffer::accept_data (выделяет отдельные пакеты) ->
+Balancer::accept_data (поддерживает пул потомков) ->
+Heaver::send_to_slave (принимает решение, какому потомку отправить) ->
+Balancer::send_data_to_child (предписывает отправить заданному потомку) ->
+OutputBuffer::accept_data ->
+Dispatcher::dispatch
+(запись)
+
+= Чтение данных от потомков
+
+(чтение)
+Dispatcher::dispatch ->
+InputBuffer::accept_data (выделяет отдельные пакеты) ->
+ChildProxy::accept_data (снабжает пакет данными о потомке) ->
+Balancer::accept_data_from_child (получает данные и информацию о потомке) ->
+Heaver::send_to_master (фиксирует факт получения данных) ->
+Balancer::send_data_to_master ->
+OutputBuffer::accept_data ->
+Dispatcher::dispatch
+(запись)
+
+= Обработка ошибок потомков
+
+(чтение)
+Dispatcher::dispatch ->
+ChildErrorProxy::accept_data (дополняет поток информацией о потомке) ->
+Logger::accept_data ->         <---.
+OutputBuffer::accept_data ->       |    сюда же поступают
+Dispatcher::dispatch               `--- все сообщения об ошибках,
+(запись)                                генерируемые в любых других местах

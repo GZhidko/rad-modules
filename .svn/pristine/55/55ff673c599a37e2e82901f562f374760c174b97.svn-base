@@ -1,0 +1,34 @@
+#include <stdio.h>
+#include <unistd.h>
+#include "log.h"
+#include "b64.h"
+#include "loop.h"
+#include "radb64.h"
+
+int parse_args(int argc, char *argv[]) {
+  int ch;
+  setup_logger(argv[0]);
+  while ((ch = getopt(argc, argv, "hDde")) != -1) {
+    switch (ch) {
+    case 'h':
+      printf("Version: " VERSION "\n"
+             "Usage: %s -[hDde]\n"
+             "\t-h -- help and exit\n"
+             "\t-D -- debugging on\n"
+             "\t-d -- decode mode\n"
+             "\t-e -- encode mode\n"
+             , argv[0]);
+      exit(0);
+      break;
+    case 'D':
+      set_debug(1);
+      break;
+    case 'e':
+      processor = b64_enc;
+      break;
+    case 'd':
+      processor = b64_dec;
+      break;
+    }
+  }
+}

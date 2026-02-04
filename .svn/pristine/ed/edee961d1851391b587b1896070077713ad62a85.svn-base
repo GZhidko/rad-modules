@@ -1,0 +1,28 @@
+#include <stdio.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include "log.h"
+#include "radre.h"
+
+char ** parse_args(int argc, char *argv[]) {
+  int ch;
+  setup_logger(argv[0]);
+  int n = 1;
+  while ((ch = getopt(argc, argv, "hd")) != -1) {
+    n++;
+    switch (ch) {
+    case 'h':
+      printf("Version: " VERSION "\n"
+             "Usage: %s -[hd] file [file [...]]\n"
+             "\t-h -- help and exit\n"
+             "\t-d -- debugging on\n"
+             , argv[0]);
+      exit(0);
+      break;
+    case 'd':
+      set_debug(1);
+      break;
+    }
+  }
+  return argv + n;
+}

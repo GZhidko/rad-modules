@@ -1,0 +1,4 @@
+gdbmauth - Authentication module using a GDBM user database.
+
+Looks up user credentials in a GDBM file and returns int=1/0. Supports
+PAP and CHAP-style requests; may return clear-password for CHAP checks.

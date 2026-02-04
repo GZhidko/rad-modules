@@ -1,0 +1,4 @@
+snmpgw - SNMP manager for OpenRADIUS.
+
+Builds SNMP requests from string attributes, performs SNMP queries, and
+returns the results as response attributes.

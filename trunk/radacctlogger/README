@@ -1,0 +1,5 @@
+radacctlogger - Accounting loggers.
+
+radacctlogger (shell) writes Livingston-style detail files using str
+attributes as subdirectories. radacctwriter (perl) writes detail files
+and supports pidfile handling.

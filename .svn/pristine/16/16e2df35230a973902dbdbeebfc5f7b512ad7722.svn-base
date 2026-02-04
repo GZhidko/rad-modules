@@ -1,0 +1,8 @@
+vasya|clearpassword||Framed-IP-Address=10.10.10.10
+vasya@blg|clearpassword||Framed-IP-Address=10.20.30.20
+vasya@blg|clearpassword||Framed-IP-Address=10.20.30.20
+vasya|clearpassword||Framed-IP-Address=10.20.30.20
+vasya#10.20.30.2|clearpassword||Framed-IP-Address=10.20.30.20
+pap-vasya||aasnL9r873gFY|Framed-IP-Address=10.20.30.20
+1-9-vasya||fMiOQ3pj86x3M|Framed-IP-Address=10.20.30.20&Framed-Compression = Van-Jacobson-TCP-IP&Framed-Protocol = PPP&Service-Type = Framed-User
+quot|"passwd 'пароль'"||

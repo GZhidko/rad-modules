@@ -1,0 +1,575 @@
+/*
+** snmpgw -- SNMP Manager for OpenRADIUS
+**
+** Sends SNMP requests built from string-type attributes, passed
+** from RADIUS engine, receives a response, then builds
+** a set of response attributes to be passed back to RADIUS engine.
+**
+** Written by Alexey Michurin <am@rol.ru>, 2008.
+*/
+#include <libgen.h>
+#include <stdarg.h>
+#include <time.h>
+#include <net-snmp/net-snmp-config.h>
+#include <net-snmp/net-snmp-includes.h>
+#include <string.h>
+#include <stdio.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+#include "../stats_c.h"
+
+/****************************************************************
+ ****  PROTO                                                 ****
+ ****************************************************************/
+
+void write_error(char *fmt, ...);
+
+/****************************************************************
+ ****  ARGS                                                  ****
+ ****************************************************************/
+
+int debug = 0;
+static const char *stats_file;
+static int stats_interval_min = 5;
+
+/****************************************************************/
+
+int process_args(int argc, char *argv[], char **client_type) {
+  int i;
+  int f;
+  for (i=1, f=0; i<argc; i++) {
+    if (f) {
+      f = 0;
+      *client_type = argv[i];
+    } else {
+      if (strcmp("-d", argv[i]) == 0) {
+        debug = 1;
+        write_error("Debugging ON\n");
+      } else if (strcmp("-s", argv[i]) == 0) {
+        if (++i < argc) stats_file = argv[i];
+        else {
+          fprintf(stderr, "Option -s requires an argument\n");
+          return 1;
+        }
+      } else if (strcmp("-i", argv[i]) == 0) {
+        if (++i < argc) stats_interval_min = atoi(argv[i]);
+        else {
+          fprintf(stderr, "Option -i requires an argument\n");
+          return 1;
+        }
+      } else if (strcmp("-t", argv[i]) == 0) {
+        f = 1;
+      } else {
+        if (strcmp("-h", argv[i]) != 0) {
+           fprintf(stderr, "Invalid parametr '%s'\n", argv[i]);
+	}
+        fprintf(stderr,
+               "USAGE: %s [-h] [-d] [-t type] [-s statfile] [-i minutes]\n"
+	       "Where \"type\" -- label for the config file\n",
+	       argv[0]);
+        return 1;
+      }
+    }
+  }
+  if (f) {
+    fprintf(stderr, "Incomplete -t option. Use -h for more information.");
+  }
+  return 0;
+}
+
+/****************************************************************
+ ****  RADIUS                                                ****
+ ****************************************************************/
+
+#define BUFFER_SIZE     4096
+#define OR_BUFFER_SIZE  4096
+#define OUT_STRING_COUNT   6 /* we need six args. */
+#define ST_INIT            0
+#define ST_t              11
+#define ST_r              12
+#define ST_SP_1           20
+#define ST_SP_2           40
+#define ST_KEY_1          50 /* wait for first char of key */
+#define ST_KEY_RUN        60 /* first char of key; prepare new string and save char */
+#define ST_KEY            61 /* next char of key; save char in current string */
+#define ST_KEY_SAVE       62 /* save key; close string */
+#define ST_KEY_SAVE_INIT  63 /* save key; close string (and EOL) */
+#define ST_KEY_EOL        70
+#define ST_DONE           80
+#define ST_ERROR          81
+#define ERROR_OK           0
+#define ERROR_RADIUS       1
+#define ERROR_EXTRA_ARGS   2
+#define ERROR_OVERBUFF     3
+#define ERROR_NOARGS       4
+#define ERROR_PARSEERR     5
+#define ERROR_INV_CHAR     6
+
+/****************************************************************/
+
+int get_strings(char *outbuff, char **outstrings) {
+  char inb[BUFFER_SIZE]; /* input puffer */
+  int  inbs = 0;         /* input buffer size */
+  int  inbi = 0;         /* input buffer index */
+  char c;                /* current char */
+  int  s;                /* state (of DFA) (what we waiting for) */
+  int  outbi = 0;        /* index for output buffer */
+  int  outsi = 0;        /* index for output strings array */
+  for (s=ST_INIT; s!=ST_DONE && s!=ST_ERROR;) {
+    if (inbi == inbs) {
+      /*      printf("[read]\n");*/
+      inbi = 0;
+      inbs = read(0, inb, BUFFER_SIZE);
+      if (inbs <= 0) return ERROR_RADIUS;
+    }
+    c = inb[inbi++];
+    /*    printf("%d + [%c] -> ", s, c);*/
+    switch (s) {
+      case ST_KEY_SAVE_INIT:
+      case ST_INIT:
+        switch (c) {
+          case 's':  s=ST_t; break;
+	  case '\n': s=ST_DONE; break;
+	  default:   s=ST_ERROR;
+	}
+	break;
+      case ST_t:
+        if (c == 't') s=ST_r;
+	else          s=ST_ERROR;
+	break;
+      case ST_r:
+        if (c == 'r') s=ST_SP_1;
+	else          s=ST_ERROR;
+	break;
+      case ST_SP_1:
+        switch (c) {
+	  case ' ': break;
+	  case '=': s=ST_SP_2; break;
+	  default:  s=ST_ERROR;
+	}
+	break;
+      case ST_SP_2:
+        switch (c) {
+	  case ' ':  break;
+	  case '"':  s=ST_KEY_1; break;
+	  case '\n': s=ST_ERROR; break;
+	  default:   s=ST_KEY_RUN; /* default set not-error state. not good. */
+	}
+	break;
+      case ST_KEY_1:
+        s=ST_KEY_RUN;
+	break;
+      case ST_KEY_RUN: /* like as ST_KEY.. */
+        s=ST_KEY;      /* continue */
+      case ST_KEY:
+        switch (c) {
+	  case '"': s=ST_KEY_SAVE; break;
+	  case '\n': s=ST_KEY_SAVE_INIT;
+	}
+	break;
+      case ST_KEY_SAVE:
+        s=ST_KEY_EOL;
+      case ST_KEY_EOL:
+        if (c == '\n') s=ST_INIT;
+	else           s=ST_ERROR;
+	break;
+      default:
+        fprintf(stderr, "Invalid state of DFA!\n");
+        exit(1);
+    }
+    /*    printf("%d\n", s); */
+    switch (s) {
+      case ST_KEY_RUN:
+        /*        printf("start str #%d\n", outsi);*/
+        if (outsi >= OUT_STRING_COUNT) return ERROR_EXTRA_ARGS;
+        outstrings[outsi] = outbuff + outbi;
+      case ST_KEY:
+        outbuff[outbi++] = c;
+        if (outbi > OR_BUFFER_SIZE) return ERROR_OVERBUFF;
+	break;
+      case ST_KEY_SAVE:
+      case ST_KEY_SAVE_INIT:
+        outbuff[outbi++] = '\0';
+        if (outbi > OR_BUFFER_SIZE) return ERROR_OVERBUFF;
+        outsi++;
+    }
+  }
+  if (s == ST_ERROR) return ERROR_PARSEERR;
+  if (outsi != OUT_STRING_COUNT) return ERROR_NOARGS;
+  return ERROR_OK;
+}
+
+/****************************************************************
+ ****  SNMP                                                  ****
+ ****************************************************************/
+
+#define STRING_SIZE       1024 /* has to be at least 40b large. for uptimeString */
+#define DEBUG_STRING_SIZE 1024
+
+/****************************************************************/
+
+struct {
+  int operation;
+  char *name;
+} snmp_operations[] = {{SNMP_MSG_GET, "get"}, {SNMP_MSG_SET, "set"}};
+
+/****************************************************************/
+
+/**
+ * @internal
+ * Converts timeticks to hours, minutes, seconds string.
+ *
+ * @param timeticks    The timeticks to convert.
+ * @param buf          Buffer to write to, has to be at 
+ *                     least 40 Bytes large.
+ *       
+ * @return The buffer.
+ */
+static char    *
+uptimeString(u_long timeticks, char *buf, size_t buflen)
+{
+    int             centisecs, seconds, minutes, hours, days;
+
+    if (netsnmp_ds_get_boolean(NETSNMP_DS_LIBRARY_ID, NETSNMP_DS_LIB_NUMERIC_TIMETICKS)) {
+        snprintf(buf, buflen, "%lu", timeticks);
+        return buf;
+    }
+
+
+    centisecs = timeticks % 100;
+    timeticks /= 100;
+    days = timeticks / (60 * 60 * 24);
+    timeticks %= (60 * 60 * 24);
+
+    hours = timeticks / (60 * 60);
+    timeticks %= (60 * 60);
+
+    minutes = timeticks / 60;
+    seconds = timeticks % 60;
+
+    if (netsnmp_ds_get_boolean(NETSNMP_DS_LIBRARY_ID, NETSNMP_DS_LIB_QUICK_PRINT))
+        snprintf(buf, buflen, "%d:%d:%02d:%02d.%02d",
+                days, hours, minutes, seconds, centisecs);
+    else {
+        if (days == 0) {
+            snprintf(buf, buflen, "%d:%02d:%02d.%02d",
+                    hours, minutes, seconds, centisecs);
+        } else if (days == 1) {
+            snprintf(buf, buflen, "%d day, %d:%02d:%02d.%02d",
+                    days, hours, minutes, seconds, centisecs);
+        } else {
+            snprintf(buf, buflen, "%d days, %d:%02d:%02d.%02d",
+                    days, hours, minutes, seconds, centisecs);
+        }
+    }
+    return buf;
+}
+
+
+/****************************************************************/
+
+/* see mib.c function sprint_realloc_by_type (line 1973) and so on */
+
+int snmp_val_to_string (netsnmp_variable_list *vars,
+                        char *type,
+			char *out_value) {
+  u_char *sp;
+  int buf_overflow;
+  size_t buf_len;
+  size_t out_len;
+  switch (vars->type) {
+    case ASN_OCTET_STR:
+      *type = 's';
+      sp = (char *)malloc(1 + vars->val_len);
+      memcpy(sp, vars->val.string, vars->val_len);
+      sp[vars->val_len] = '\0';
+      snprintf(out_value, STRING_SIZE, "%s", sp);
+      free(sp);
+      break;
+    case ASN_INTEGER:
+      *type = 'i';
+      snprintf(out_value, STRING_SIZE, "%ld", *(vars->val.integer));
+      break;
+    case ASN_UINTEGER:
+      *type = 'u';
+      snprintf(out_value, STRING_SIZE, "%lu", *(vars->val.integer));
+      break;
+    case ASN_IPADDRESS:
+      *type = 'a';
+      sp = vars->val.string;
+      if (sp) {
+        snprintf(out_value, STRING_SIZE, "%d.%d.%d.%d", sp[0], sp[1], sp[2], sp[3]);
+      } else {
+	/* net-snmp-like behaviour. error? or feature? */
+        snprintf(out_value, STRING_SIZE, "");
+      }
+      break;
+    case ASN_TIMETICKS:
+      *type = 't';
+      uptimeString(*(u_long *)(vars->val.integer), out_value, STRING_SIZE);
+      break;
+    case ASN_NULL:
+      *type = 'n';
+      snprintf(out_value, STRING_SIZE, "%s", "NULL");
+      break;
+    case ASN_OBJECT_ID:
+      *type = 'o';
+      buf_overflow = 0;
+      buf_len = STRING_SIZE;
+      out_len = 0;
+      netsnmp_sprint_realloc_objid_tree((u_char **) &out_value, &buf_len,
+        &out_len, 0, &buf_overflow,
+	(oid *) (vars->val.objid), vars->val_len / sizeof(oid));
+      if (buf_overflow) {
+        return -1; /* log this case? */
+      }
+      break;
+    default:
+      *type = '?';
+      out_value = "";
+      return -1;
+  }
+  return 0;
+}
+
+/****************************************************************/
+
+int  snmp_client(char *agent,
+                 char *community,
+		 char *operation,
+		 char *in_oid,
+		 char in_type,
+		 char *in_value,
+		 int  *rc,
+		 const char **snmp_error,
+		 char **out_oid,
+		 char *out_type,
+		 char *out_value)
+{
+  netsnmp_session session, *ss;
+  netsnmp_pdu *pdu, *response;
+  netsnmp_variable_list *vars;
+  int i, f, snmp_op, status;
+  oid snmp_oid[MAX_OID_LEN];
+  size_t snmp_oid_len;
+  char debug_mess_buff[DEBUG_STRING_SIZE];
+
+  /* prepare data: operation */
+  f = 1;
+  for (i=0; i<2; i++) {
+    if (strcmp(operation, snmp_operations[i].name) == 0) {
+      f = 0;
+      snmp_op = snmp_operations[i].operation;
+      break;
+    }
+  }
+  if (f) {
+    *rc = 1000;
+    *snmp_error = "invalid operation (use 'get' or 'set')";
+    return -1;
+  }
+  /* prepare data: oid */
+  snmp_oid_len = MAX_OID_LEN;
+  if (!snmp_parse_oid(in_oid, snmp_oid, &snmp_oid_len)) {
+    *rc = 1001;
+    *snmp_error = "invalid oid";
+    return -2;
+  }
+
+  /* init session */
+  snmp_sess_init(&session);
+  /* setup session */
+  session.peername = agent; /* strdup(agent); */
+  session.version = SNMP_VERSION_1;
+  session.community = community;
+  session.community_len = strlen(community);
+  /* open connection */
+  SOCK_STARTUP;
+  ss = snmp_open(&session);
+  if (!ss) {
+    *rc = snmp_errno; /*MTCRITICAL_RESOURCE */
+    *snmp_error = snmp_api_errstring(snmp_errno);
+    SOCK_CLEANUP;
+    return -10;
+  }
+
+  /* prepare pdu */
+  pdu = snmp_pdu_create(snmp_op);
+  if (snmp_op == SNMP_MSG_GET) {
+    snmp_add_null_var(pdu, snmp_oid, snmp_oid_len);
+  } else {
+    /* printf("set\n"); */
+    if (snmp_add_var(pdu, snmp_oid, snmp_oid_len, in_type, in_value)) {
+      *rc = snmp_errno; /*MTCRITICAL_RESOURCE */
+      *snmp_error = snmp_api_errstring(snmp_errno);
+      SOCK_CLEANUP;
+      return -11;
+    }
+  }
+  /* get response */
+  status = snmp_synch_response(ss, pdu, &response);
+  /* process response */
+  if (status == STAT_SUCCESS && response->errstat == SNMP_ERR_NOERROR) {
+    /* we process only one var */
+    vars = response->variables;
+    if (vars->next_variable) {
+      *rc = 1002;
+      *snmp_error = "Not only one variable in response";
+      SOCK_CLEANUP;
+      return -12;
+    }
+    /* ok */
+    if (debug) {
+      if (snprint_variable(debug_mess_buff, DEBUG_STRING_SIZE, vars->name, vars->name_length, vars) >= 0) {
+        write_error("Message: \"%s\"\n", debug_mess_buff);
+      } else {
+        write_error("Message: I CAN NOT STRINGIFY MESSAGE!\n");
+      }
+    }
+    if (snmp_val_to_string(vars, out_type, out_value)) {
+      *rc = 1003;
+      *snmp_error = "Type can not be stringify yet";
+      SOCK_CLEANUP;
+      return -13;
+    }
+  } else {
+    if (status == STAT_SUCCESS) {
+      *rc = 1004;
+      *snmp_error = snmp_api_errstring(snmp_errno); /* "Error in packet" */
+    } else if (status == STAT_TIMEOUT) {
+      *rc = 1005;
+      *snmp_error = "Timeout";
+    } else {
+      *rc = 1006;
+      *snmp_error = "Session error";
+    }
+    SOCK_CLEANUP;
+    return -3;
+  }
+
+  if (response) {
+    snmp_free_pdu(response);
+  }
+
+  snmp_close(ss); /* left 32 bytes !!! :-( */
+                  /* http://net-snmp.sourceforge.net/wiki/index.php/Debugger */
+  SOCK_CLEANUP;
+  
+  /* correct exit */
+  *out_oid = in_oid;
+  *rc = 0;
+  *snmp_error = "";
+  return 0;
+}
+
+/****************************************************************
+ ****  LOG                                                   ****
+ ****************************************************************/
+
+pid_t app_pid = 0;
+char *app_name = "[NOTSET]";
+
+/****************************************************************/
+
+void write_error(char *fmt, ...) {
+  time_t stamp;
+  va_list ap;
+  int bol;
+  char s[1024];
+  char p[1024];
+  char string[2048];
+  char *sp, *a, *b;
+  stamp = time(&stamp);
+  strcpy(p, asctime(localtime(&stamp)));
+  sprintf(p + strlen(p) - 1, " %s[%u] ", basename(app_name), app_pid);
+  va_start(ap, fmt);
+  vsprintf(s, fmt, ap);  /* XXX */
+  va_end(ap);
+  bol = 1; /* bol -- begin of line flag */
+  for (a=s, sp=string; *a;) {
+    if (bol) {
+      for (b=p; *b;) *sp++ = *b++;
+      bol = 0;
+    }
+    if (*a == '\n') bol = 1;
+    *sp++ = *a++;
+  }
+  *sp = '\0';
+  write(2, string, strlen(string));
+}
+
+/****************************************************************
+ ****  M A I N                                               ****
+ ****************************************************************/
+
+int main(int argc, char ** argv)
+{
+  char *or_args[OUT_STRING_COUNT];
+  char or_buffer[OR_BUFFER_SIZE];
+  char or_out_buffer[OR_BUFFER_SIZE];
+  int rc, i;
+  unsigned long limit, count;
+  char *client_type = "rad_snmp_gw";
+
+  const char *snmp_error;
+  char *out_oid;
+  char out_type = '?';
+  char out_value[STRING_SIZE];
+
+  app_name = argv[0];
+  app_pid = getpid();
+
+  if (process_args(argc, argv, &client_type)) return 2;
+
+  limit = ((app_pid & 3) + 1) << 12; /* 4-16K */
+  if (debug) write_error("Start. limit=%lu; type=\"%s\"\n", limit, client_type);
+
+  init_snmp(client_type);
+  stats_c_t stats;
+  stats_c_init(&stats, "snmpgw", stats_file, stats_interval_min);
+
+  for (count=0; count<limit; count++) {
+    rc = get_strings(or_buffer, or_args);
+    if (rc == ERROR_OK) {
+      uint64_t stats_start_ms = stats_c_now_ms();
+      snmp_client(or_args[0],
+                  or_args[1],
+  	          or_args[2],
+	          or_args[3],
+	          or_args[4][0],
+	          or_args[5],
+	          &rc,
+	          &snmp_error,
+	          &out_oid,
+	          &out_type,
+	          out_value);
+      if (rc == 0) {
+        snprintf(or_out_buffer, OR_BUFFER_SIZE,
+                 "str=\"%d\"\n" /* rc -- error code */
+		 "str=\"%s\"\n" /* error description */
+		 "str=\"%s\"\n" /* oid */
+		 "str=\"%c\"\n" /* type */
+         "str=\"%s\"\n" /* value */
+         "int=1\n\n",
+         rc, snmp_error, out_oid, out_type, out_value);
+	write(1, or_out_buffer, strlen(or_out_buffer));
+        stats_c_record(&stats, stats_c_now_ms() - stats_start_ms);
+      } else {
+        write_error("SNMP error %d: %s\n", rc, snmp_error);
+	if (rc >= -3) {
+          return 2; /* fatal error */
+	}
+      }
+    } else {
+      write_error("Radius error %d\n", rc);
+      return 1;
+    }
+  }
+
+  if (debug) write_error("Stop. (limit used up)\n", limit);
+
+  return 0;
+}
+
+/* EOF */

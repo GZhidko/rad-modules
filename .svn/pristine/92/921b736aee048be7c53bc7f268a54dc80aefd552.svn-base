@@ -1,0 +1,99 @@
+#!/usr/bin/perl -w
+#
+# Usage: csv2gdbm -h
+#
+
+=head1 NAME
+
+    csv2gdbm
+
+=head1 SYNOPSIS
+
+    csv2gdbm -h
+    csv2gdbm [-s text-file] [-f gdbm-file]
+
+=head1 DESCRIPTION
+
+Text file is a CSV-like file.
+
+Value separator -- '|' (pipe).
+
+Fields:
+
+=over
+
+=item 1
+
+Login
+
+=item 2
+
+Cleartext password or empty string
+
+=item 3
+
+Crypted password or empty string
+
+=item 4
+
+&-separated pairs of RADIUS attributes.
+
+=item 5
+
+NAS address or empty string
+
+=back
+
+=head1 AUTHOR
+
+Alexey Michurin <am@rol.ru>
+
+=cut
+
+
+use strict;
+use GDBM_File;
+use Getopt::Long;
+
+my $VERSION = '0.1';
+my $MODULE = 'csv2gdbm';
+
+my $gdbm_file = 'users.gdbm';
+my $source_file = 'users.txt';
+my $help = 0;
+my %DB;
+
+exit 1 unless (GetOptions(
+    'help' => \$help,
+    'source=s' => \$source_file,
+    'file=s' => \$gdbm_file));
+
+if ($help) {
+    print <<"TEXT";
+$MODULE $VERSION
+Usage: $MODULE -h
+       $MODULE -f file -s file
+TEXT
+    exit 0;
+}
+
+open FH, "<$source_file" or die "Can't open $source_file: $!\n";
+tie %DB, 'GDBM_File', $gdbm_file, &GDBM_WRCREAT, 0640 or die "Can't open $gdbm_file: $!\n";
+
+while (<FH>) {
+    chomp;
+    my @f = split(/\Q|/, $_, -1);
+    if ($#f != 4) {
+        warn "LEFT LINE: #f=$#f: $_\n";
+        next;
+    }
+    my $k = join('|', @f[0, 4]);
+    if (exists($DB{$k})) {
+        warn "DUP: $k\n";
+    }
+    my $v = join('|', @f[1, 2, 3]);
+    $DB{$k} = $v;
+}
+
+untie %DB;
+close FH;

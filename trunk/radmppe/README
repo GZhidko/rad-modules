@@ -1,0 +1,18 @@
+Build
+-----
+./autogen.sh
+./configure
+./make
+
+Test
+----
+cat test-e.req | ./radmppe -evvvv
+cat test-d.req | ./radmppe -dvvvv
+
+Test lib (bugs in MPPE?)
+------------------------
+gcc -Wall -lmd -o ms_mppe_test log.c ms_mppe.c ms_mppe_test.c
+
+Prepere dist
+------------
+make dist-gzip

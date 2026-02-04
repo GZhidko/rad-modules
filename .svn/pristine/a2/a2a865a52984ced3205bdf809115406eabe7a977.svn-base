@@ -1,0 +1,169 @@
+#!/usr/bin/perl -w
+#
+# Usage: h323date [-h] [-d] [-v]
+#
+# Author: Alexey Michurin <am@rol.ru>, 2011
+#
+# Permission to redistribute an original or modified version of this program in
+# source, intermediate or object code form is hereby granted exclusively under
+# the terms of the GNU General Public License, version 2. Please see the file
+# COPYING for details, or refer to http://www.gnu.org/copyleft/gpl.html.
+#
+
+use strict;
+use POSIX qw(asctime);
+use Getopt::Long;
+
+#####   CONSTANTS
+
+my $VERSION = '0.1';
+
+$/ = "\n\n";
+$| = 1;
+
+my $mod = 'h323date';
+my $pid = "[$$]";
+
+my $verbose = '';
+my $vverbose = '';
+my $help = '';
+
+#####   S U B S
+
+sub logger {
+    my $s = $_[0];
+    my $t = substr(asctime(localtime(time())), 0, -1);
+    $s =~ s/\\/\\\\/g;
+    $s =~ s/\x0A/\\n/g;
+    $s =~ s/\x0D/\\r/g;
+    print STDERR "$t $mod$pid $s\n";
+}
+
+sub lexer {
+    my $s = $_[0];
+    my %r = ();
+    my $l = 1;
+    while ($s=~m{\G
+                 (?:                  # record...
+                     [[:blank:]]*
+                     ([A-Za-z0-9:_-]+)    # attribute ($1)
+                     [[:blank:]]*=[[:blank:]]*
+                     (?:
+                         ([^\"\n]+) |     # bare str or int or date or int ($2)
+                         \"([^\"\n]*)\" | # quoted str ($3)
+                     )
+                     \n
+                 |                    # ...or last line
+                     \n\z
+                 )
+                }gcx)
+    {
+        ++$l;
+        return \%r unless (defined $1);
+        $r{$1} = [] unless (exists $r{$1});
+        push @{$r{$1}}, (defined($2) ? $2 : $3);
+    }
+    return "Error in line $l"; # error
+}
+
+sub strptime {
+    my $FMT = '%04d%02d%02d%02d%02d%02d';
+    my ($h, $m, $s, $mo, $d, $y) = @_;
+    my $tgt = sprintf($FMT, $y, $mo, $d, $h, $m, $s);
+    logger("strptime: tgt=$tgt") if ($vverbose);
+    # it is time bomb
+    # well up to Fri Jul 14 06:40:00 2017
+    my ($v1, $v, $v2) = (1300000000, 1400000000, 1500000000);
+    #
+    for my $i (0..24) {
+        logger("strptime: i=$i") if ($vverbose);
+        $v = ($v1 + $v2)/2;
+        # @a=($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst)
+        my @a = gmtime($v);
+        $a[5] += 1900; # fix Y2K problem
+        my $tt = sprintf($FMT, reverse(@a[0..5]));
+        logger("strptime: gmtime(v=$v)=".gmtime($v)) if ($vverbose);
+        logger("strptime: tt=$tt ($tgt)") if ($vverbose);
+        if ($tt lt $tgt) {
+            $v1 = $v;
+        } elsif ($tt gt $tgt) {
+            $v2 = $v;
+        } else {
+            last;
+        }
+    }
+    $v = int($v);
+    logger("strptime: gmtime(v=$v)=".gmtime($v)) if ($vverbose);
+    return $v;
+}
+
+sub process {
+    my $i = $_[0];
+    logger("Request: [$i]") if ($verbose);
+    my $r = lexer($i);
+    unless (ref($r)) {
+        logger("Lexer can not parse request: [$r] (FATAL ERROR)");
+        exit 1;
+    }
+    unless (exists($r->{'str'})) {
+        logger("Lexer can not find 'str' in request");
+        return undef;
+    }
+    unless ($#{$r->{'str'}} >= 0) {
+        logger("Lexer can not find value of 'str' in request");
+        return undef;
+    }
+    my $d = $r->{'str'}[0];
+    if ($d =~ m/^(\d{1,2}):(\d{1,2}):(\d{1,2}\.\d{1,6})\sUTC\s\S+\s(\S{3})\s(\d{1,2})\s(\d{1,4})$/) {
+        my $t = strptime($1, $2, $3, {
+                 'Jan' => 0,
+                 'Feb' => 1,
+                 'Mar' => 2,
+                 'Apr' => 3,
+                 'May' => 4,
+                 'Jun' => 5,
+                 'Jul' => 6,
+                 'Aug' => 7,
+                 'Sep' => 8,
+                 'Oct' => 9,
+                 'Nov' => 10,
+                 'Dec' => 11}->{$4}, $5, $6);
+        return qq|int=$t\n|;
+    }
+    logger("ERROR: Can not parse string [$d].");
+    return undef;
+}
+
+#####   M A I N
+
+exit 1 unless (GetOptions('debug' => \$verbose, 'verbose' => \$vverbose, 'help' => \$help));
+$verbose = 1 if ($vverbose);
+
+if ($help) {
+    print <<"TEXT";
+$mod $VERSION
+Usage: $mod -h    Print help message and exit
+       $mod -d    Debug mode
+       $mod -v    Verbose debug
+TEXT
+    exit 0;
+}
+
+#####   L O O P
+
+while (<STDIN>) {
+
+    my $r = process($_);
+    if (defined $r) {
+        $r .= "int=1\n\n";
+    } else {
+        $r = "int=0\n\n";
+    }
+
+    logger("Response: [$r]") if ($verbose);
+
+    print STDOUT $r;
+
+}
+
+#####   E O F

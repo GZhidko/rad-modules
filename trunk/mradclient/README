@@ -1,0 +1,4 @@
+mradclient - Wrapper around radclient with retry/balancing logic.
+
+Runs radclient as a child process, multiplexes requests, and can remove
+or use a retry-indicator attribute to correlate retries.

@@ -1,0 +1,15 @@
+INSTALL
+
+sh autogen.sh
+sh configure
+make
+cp radre /usr/local/lib/openradius/radre
+
+DEMO
+
+sh test.sh
+
+TEST
+
+sh test.sh -d
+

@@ -1,0 +1,7 @@
+2007/10/05 - 0.0.3
+       - Split and clean code
+       - Fix Makefile.am
+       - Fix write_error
+       - Replace printf with write in main loop
+2007/10/04 - 0.0.2
+       - Include lhash.[ch] in distributive

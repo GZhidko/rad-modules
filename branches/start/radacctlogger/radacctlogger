@@ -1,0 +1,143 @@
+#!/bin/sh
+#
+# This file is in the public domain
+
+# Process options - or how to do getopt(3) in shell scripts ;-)
+DEBUG=0
+SINGLE=0
+USAGE=0
+PIDFILE=
+while [ -n "$1" ]	# Loop as long as $1 is nonempty
+do
+	case $1 in
+		-d)
+			DEBUG=1
+			shift
+			;;
+		-o)
+			# Used to redirect fd 2 (where debugging output
+			# normally goes) to a file - same as server itself
+			if [ ! "$2" = "" ]
+			then
+				exec 2>$2
+				shift;
+			else
+				echo ERROR: Option -o requires an argument 1>&2
+				USAGE=1
+			fi
+			shift
+			;;
+		-p)
+			# Used to write pid into a file, for log rotation
+			if [ ! "$2" = "" ]
+			then
+				PIDFILE=$2
+				shift
+			else
+				echo ERROR: Option -p requires an argument
+				USAGE=1
+			fi
+			shift
+			;;
+		-h)
+			USAGE=1
+			shift
+			;;
+		*)
+			# If this is not the last argument, it's an
+			# unknown option - complain. Otherwise it's
+			# the positional argument, and we're done
+			# with the loop.
+			if [ -n "$2" ] 	    # If $2 is nonempty, $1 is not last
+			then
+				echo ERROR: Unknown option $1 1>&2
+				USAGE=1
+				shift
+			else
+				break
+			fi
+			;;
+	esac
+done
+
+if [ -z "$1" ]
+then
+	echo ERROR: No destination directory specified 1>&2
+	USAGE=1
+fi
+DESTDIR=$1
+
+if [ $USAGE = 1 ]
+then
+	echo "Usage: radacctlogger [-d][is][-o file][-p pidfile] destination-directory" 1>&2
+	echo "       radacctlogger -h" 1>&2
+	exit 1
+fi
+
+if [ -n "$PIDFILE" ]
+then
+	echo $$ >$PIDFILE
+	trap "rm $PIDFILE" TERM
+fi
+
+# Loop, answering requests
+while : 
+do
+	# Read message
+	OUTPUT=
+        DESTFILE=$DESTDIR
+	IFS='='
+	while read ATR VAL && [ -n "$VAL" ]
+	do
+		IFS=' '
+		if [ "str" = "$ATR" ]
+		then
+			# Remove quotes
+			eval VAL=$VAL
+
+			# Treat str's as subdirs
+			DESTFILE="$DESTFILE/$VAL"
+		else
+			# Add pair. Note the real tab before $ATR
+			OUTPUT="$OUTPUT	$ATR = $VAL
+"
+		fi
+		IFS='='
+	done
+	IFS=' '
+
+	# Show debugging output if requested
+	[ $DEBUG = 1 ] && echo "radacctlogger[$$]: $OUTPUT" 1>&2
+
+	# Add date header
+	OUTPUT="`/usr/bin/date +%a\ %b\ %e\ %T\ %Y`
+$OUTPUT"
+
+	if [ ! -d $DESTFILE ]; then
+		mkdir -p $DESTFILE
+		if [ $? ]; then
+			echo "int=0
+"
+			echo "radacctlogger[$$]: mkdir $DESTFILE failed" 1>&2
+			continue
+		fi
+	fi
+
+	DESTFILE="$DESTFILE/detail"
+
+	# Log output to file
+	echo "$OUTPUT" >> $DESTFILE
+	if [ $? ]; then
+		echo "int=0
+"
+		echo "radacctlogger[$$]: >> $DESTFILE failed" 1>&2
+		continue
+	fi
+
+	# Reply
+#	sleep 1		# testing only - don't worry, we're race-free ;-)
+	echo "int=1
+"
+
+done
+

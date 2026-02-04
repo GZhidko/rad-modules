@@ -1,0 +1,4 @@
+radeval - Evaluate expressions from str attributes.
+
+Runs Perl eval on each input str and returns the results as str values
+plus int=1.

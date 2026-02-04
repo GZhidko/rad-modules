@@ -1,0 +1,119 @@
+#!/usr/bin/perl -w
+#
+# Usage: gdbmfile -h
+#
+
+use strict;
+use POSIX qw(asctime);
+use Getopt::Long;
+use GDBM_File;
+
+#####   G L O B A L S
+
+$/ = "\n\n";
+$| = 1;
+
+my $VERSION = '0.1';
+my $MODULE = 'gdbmfile';
+
+my $PID = "[$$]";
+
+my $verbose = '';
+my $help = '';
+my $gdbm_file = '/usr/local/etc/openradius/legacy/users.gdbm';
+
+my %DB;
+
+my $R_OK = "int=1\n\n";
+my $R_FAIL = "int=0\n\n";
+
+#####   S U B S
+
+sub logger {
+    my $s = $_[0];
+    my $t = substr(asctime(localtime(time())), 0, -1);
+    $s =~ s/\\/\\\\/g;
+    $s =~ s/\x0A/\\n/g;
+    $s =~ s/\x0D/\\r/g;
+    print STDERR "$t $MODULE $PID $s\n";
+}
+
+sub lexer {
+    my $s = $_[0];
+    my %r = ();
+    my $l = 1;
+    while ($s=~m{\G
+                 (?:                  # record...
+                     [[:blank:]]*
+                     ([A-Za-z0-9:_-]+)    # attribute ($1)
+                     [[:blank:]]*=[[:blank:]]*
+                     (?:
+                         ([^\"\n]+) |     # bare str or int or date or int ($2)
+                         \"([^\"\n]*)\" | # quoted str ($3)
+                     )
+                     \n
+                 |                    # ...or last line
+                     \n\z
+                 )
+                }gcx)
+    {
+        ++$l;
+        return \%r unless (defined $1);
+        $r{$1} = [] unless (exists $r{$1});
+        push @{$r{$1}}, (defined($2) ? $2 : $3);
+    }
+    return "Error in line $l"; # error
+}
+
+sub process {
+    my $i = $_[0];
+    logger("Request: [$i]") if ($verbose);
+    my $r = lexer($i);
+    unless (ref($r)) {
+        logger("Lexer can not parse request: [$r] (FATAL ERROR)");
+        exit 1;
+    }
+    unless (exists($r->{'str'})) {
+        logger("Lexer can not find 'str' in request");
+        return $R_FAIL;
+    }
+    my $result = undef;
+    foreach my $k (@{$r->{'str'}}) {
+        logger("Try: [$k]") if ($verbose);
+        if (exists $DB{$k}) {
+            return "$DB{$k}\nint=1\n\n";
+        }
+    }
+    return "int=0\n\n";
+}
+
+#####   M A I N
+
+exit 1 unless (GetOptions(
+    'debug' => \$verbose,
+    'help' => \$help,
+    'file=s' => \$gdbm_file));
+
+if ($help) {
+    print <<"TEXT";
+$MODULE $VERSION
+Usage: $MODULE -h
+       $MODULE -d
+       $MODULE -f file
+TEXT
+    exit 0;
+}
+
+#####   P R E P A R E
+
+tie %DB, 'GDBM_File', $gdbm_file, &GDBM_READER, 0640 or die "Can't open $gdbm_file: $!\n";
+
+#####   L O O P
+
+while (<STDIN>) {
+    my $r = process($_);
+    logger("Response: [$r]") if ($verbose);
+    print STDOUT $r;
+}
+
+#####   E O F

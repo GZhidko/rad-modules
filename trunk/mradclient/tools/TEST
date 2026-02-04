@@ -1,0 +1,6 @@
+например так:
+./storm.pl | ../src/mradclient -u T -- ./echo.pl 2>&1 >/dev/null | grep Stat
+или как-то так
+$ cat req
+$ ../src/mradclient -r -u RAD-Authenticator -- ./echo.pl
+$ ../src/mradclient -u RAD-Authenticator -- ./echo.pl

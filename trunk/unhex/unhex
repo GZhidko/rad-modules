@@ -1,0 +1,129 @@
+#!/usr/bin/perl -w
+#
+# OpenRADIUS module that echos its first str value back into radius core.
+#
+# Usage: unhex [-d]
+# 
+# Author: Ilya Etingof <elie@rol.ru>, 2008
+#
+# Permission to redistribute an original or modified version of this program in
+# source, intermediate or object code form is hereby granted exclusively under
+# the terms of the GNU General Public License, version 2. Please see the file
+# COPYING for details, or refer to http://www.gnu.org/copyleft/gpl.html.
+#
+# This code has been derived from Emile van Bergen's radsql module.
+#
+
+########
+# USES #
+########
+
+use Getopt::Long;
+use strict qw(vars);
+use POSIX qw(asctime);
+use Time::HiRes qw(time);
+
+###########
+# OPTIONS #
+###########
+
+my $progid = "unhex";
+my $pid = "[" . $$ . "]";
+my $usage = 0;
+my $debug = 0;
+my $line;
+my $logfile;
+my $stat_file;
+my $stat_interval = 5;
+
+########
+# MAIN #
+########
+
+# Get options
+
+Getopt::Long::Configure("bundling");
+GetOptions("h"  => \$usage,
+           "d" => \$debug,
+           "s=s" => \$stat_file,
+           "i=i" => \$stat_interval);
+
+if ($usage) {
+    die("Usage: $progid [-d]\n" .
+        "       $progid -h\n");
+}
+
+# Check that we're running under OpenRADIUS, interface version 1
+
+unless ($debug ||
+    $ENV{'RADIUSINTERFACEVERSION'} &&
+    $ENV{'RADIUSINTERFACEVERSION'} == 1) {
+    die "not running under OpenRADIUS, interface v1!\n";
+}
+
+# Set record separator to empty line and loop on input.
+
+$/ = "\n\n";
+$| = 1;         # Important - we're outputting to a pipe
+
+my $stats_lib = $0;
+$stats_lib =~ s{/[^/]+$}{};
+require "$stats_lib/../stats.pl";
+stats_init($progid, $stat_file, $stat_interval);
+
+my $a;
+my $v;
+my $date;
+
+while(<STDIN>) {
+    my $start = time();
+    while(s/^\s*
+          ([A-Za-z0-9:-]+)               # attribute ($1)
+          \s*=\s*
+          (
+           (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}).*|      # ip ($3)
+           (\d+).*|                      # int or date ($4)
+           \"([^\"]*)\".*|                # quoted str ($5)
+           ([^\"].*)                      # bare str ($6)
+           )
+          (\n|\$)//mx
+          )
+    {
+        $a = $1;
+        $v = "";
+        if (defined $5 || defined $6) {
+            if ($a eq "str") {
+                $v = $5;
+            }
+            if ($debug) {
+                print STDERR "$progid$pid: taken $a=\"$v\"\n";
+            }
+        } else {
+            if ($debug) {
+                print STDERR "$progid$pid: ignoring attribute $a\n";
+            }
+        }
+    }
+
+    if (!$v) {
+        if ($debug) {
+            print STDERR "$progid$pid: no str=value in message\n";
+        }
+        $v = "int=0\n\n";
+    } else {
+        $v = join("", map {chr(hex($_))} $v=~m/([0-9a-fA-F]{2})/g);
+        $v = "int=1\nstr=$v\n\n";
+    }
+
+    if ($debug) {
+        print STDERR "$progid$pid: will write:\n$v";
+    }
+    
+    print "$v";
+    my $elapsed_ms = int((time() - $start) * 1000);
+    stats_record($elapsed_ms);
+}
+
+if ($debug) {
+    print STDERR "$progid$pid: EOF from stdin\n";
+}

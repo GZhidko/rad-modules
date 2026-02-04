@@ -1,0 +1,106 @@
+как это всё прикрутить
+
+
+---== 1 ==---
+
+в словари; на пример сюда subdicts/dict.gldn
+добавить атрибут; например такой
+$add attribute 160 GLDN-MRadClient-Unifier val_type=String
+
+
+
+---== 2 ==---
+
+в behaviour
+добавить работу с этим атрибутом; как-то так:
+***************
+*** 39,44 ****
+--- 39,47 ----
+  RAD-Code = Access-Reject,
+  RAD-Identifier = RAD-Identifier,
+  RAD-Authenticator = "" . RAD-Authenticator,   # we need a copy
++
++ REQ:GLDN-MRadClient-Unifier = "" . RAD-Authenticator,
++
+  moveall Proxy-State,
+
+  # Look up the client's secret by packet's source IP address;
+
+
+
+---== 3 ==---
+
+в configuration
+поправить интерфейс как-то так:
+interface (name="RadiusClient",
+       sendattr="RAD-Identifier",    # <------------- нужно!
+       sendattr="RAD-Code",
+       sendattr="Target-Server",
+       sendattr="User-Name",
+       sendattr="User-Password",
+       sendattr="CHAP-Password",
+       sendattr="CHAP-Challenge",
+       sendattr="MS-CHAP-Challenge",
+       sendattr="MSCHAP2-RESP:Microsoft:MSRESP2-Response",
+       sendattr="MSCHAP2-RESP:Microsoft:MSRESP2-Peer-Challenge",
+       sendattr="MSCHAP2-RESP:Microsoft:MSRESP2-Fullresp",
+       sendattr="MSCHAP2-RESP:Microsoft:MSRESP2-Flags",
+       sendattr="MSCHAP2-RESP:Microsoft:MSRESP2-Ident",
+       sendattr="Service-Type",
+       sendattr="Calling-Station-Id",
+       sendattr="Called-Station-Id",
+       sendattr="Connect-Info",
+       sendattr="NAS-Port",
+       sendattr="NAS-Port-Type",
+       sendattr="NAS-Port-Id",
+       sendattr="NAS-IP-Address",
+       sendattr="NAS-Identifier",
+       sendattr="State",
+       sendattr="Class",
+       sendattr="Acct-Status-Type",
+       sendattr="Acct-Session-Id",
+       sendattr="Acct-Multi-Session-Id",
+       sendattr="Framed-IP-Address",
+       sendattr="Acct-Input-Octets",
+       sendattr="Acct-Output-Octets",
+       sendattr="Acct-Input-Gigawords",
+       sendattr="Acct-Output-Gigawords",
+       sendattr="Acct-Input-Packets",
+       sendattr="Acct-Output-Packets",
+       sendattr="Acct-Terminate-Cause",
+       sendattr="Timestamp",
+       sendattr="Acct-Delay-Time",
+       sendattr="Acct-Session-Time",
+       sendattr="WISPr-Location-Name",
+       sendattr="Radclient-Query-Id", # this is not added automatically <---- и нам очень желательно
+       sendattr="Tunnel-Server-Endpoint",
+       sendattr="Tunnel-Client-Endpoint",
+       sendattr="Tunnel-Type",
+       sendattr="Framed-Protocol",
+       sendattr="GLDN-MRadClient-Unifier", # <--------- нужно!!!
+       prog="/home/michurin/mradclient -c 10 -u GLDN-MRadClient-Unifier -r -- /usr/local/lib/openradius/radclient -C -c 1 -t 6",
+       recvattr="int", # obligatory, module screws response chain otherwise
+       recvattr="Radclient-Query-Id", # this is not added automatically
+       recvattr="RAD-Code",
+       recvattr="State",
+       recvattr="Class",
+       recvattr="Framed-IP-Address",
+       recvattr="Session-Timeout",
+       recvattr="Idle-Timeout",
+       recvattr="Reply-Message",
+       recvattr="Acct-Interim-Interval",
+       recvattr="VimpelCom-Security-Level",
+       recvattr="VimpelCom-Upstream-Bandwidth",
+       recvattr="VimpelCom-Downstream-Bandwidth",
+       recvattr="Cisco-AVPair",
+       recvattr="MS-MPPE-Recv-Key",
+       recvattr="MS-MPPE-Send-Key",
+       recvattr="MS-MPPE-Enc-Policy",
+       recvattr="MS-MPPE-Enc-Types",
+       recvattr="MSCHAP2-SUCC:Microsoft:SUCC2-String",
+       recvattr="MSCHAP2-SUCC:Microsoft:SUCC2-Ident",
+       flags=Ascii + Short-Attr,
+       window=2048,
+       jobticket="Radclient-Query-Id",
+       timeout=20)                     # interface guard timeout
+

@@ -1,0 +1,46 @@
+dnl
+dnl Configure script pattern for c-ascifile OpenRADIUS module.
+dnl
+dnl $Log: not supported by cvs2svn $
+dnl
+
+dnl Init autoconf
+AC_INIT(parser.l)
+
+dnl Get canonical system information
+AC_CANONICAL_SYSTEM
+
+dnl Init automake
+AM_INIT_AUTOMAKE(afile, 0.0.3, am@rol.ru)
+AM_CONFIG_HEADER(config.h)
+
+dnl Checks for programs.
+AC_PROG_CC
+AC_PROG_CPP
+AC_PROG_LEX
+AC_PROG_INSTALL
+AC_PROG_MAKE_SET
+AM_PROG_LIBTOOL
+
+dnl Checks for libraries.
+dnl AC_CHECK_LIB(ssl, crypto)
+
+dnl Checks for header files.
+AC_HEADER_STDC
+dnl AC_CHECK_HEADERS(openssl/lhash.h)
+
+dnl AC_ARG_WITH(openssl-dir, [  --with-openssl-dir=LOC    Openssl dir ])
+dnl if test "X${with_openssl_source_dir}" != "X"; then
+dnl    OPENSSL_INCLUDE_DIR=${with_openssl_dir}/include
+dnl else
+dnl    OPENSSL_INCLUDE_DIR=.
+dnl fi
+dnl if test \! -f "${OPENSSL_INCLUDE_DIR}/constants.h"; then
+dnl     AC_ERROR(Cannot build without Openssl)
+dnl else
+dnl     AC_WARN(Using Openssl include dir ${OPENSSL_INCLUDE_DIR})
+dnl fi
+dnl AC_SUBST(OPENSSL_INCLUDE_DIR)
+
+dnl Output gathered data
+AC_OUTPUT([Makefile])

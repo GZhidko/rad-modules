@@ -1,0 +1,13 @@
+Mon Jun  2 16:45:37 MSD 2008 - am@rol.ru
+    = add -t and -h args
+    = clean up output
+    = ignore SNMP-errors
+    = support types:
+       u UNSIGNED
+       n NULLOBJ
+       o OBJID
+       t TIMETICKS
+       a IPADDRESS
+    = add examples
+    = add comments in autoge.sh
+    = return int=1

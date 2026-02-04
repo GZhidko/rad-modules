@@ -1,0 +1,4 @@
+sh autogen.sh
+sh configure
+make
+cp radb64 /usr/local/lib/openradius/radb64

@@ -1,0 +1,14 @@
+2008/11/21 - 0.0.5
+       - Allow '\xNN' in key-value file
+2007/10/22 - 0.0.4
+       - Critical fix: kvfile die if something wrong with STD* streams
+2007/10/08 - 0.0.3
+       - Logging: add time, proc name and pid
+       - Fix write_error: add va_end
+2007/10/05 - 0.0.3
+       - Split and clean code
+       - Fix Makefile.am
+       - Fix write_error
+       - Replace printf with write in main loop
+2007/10/04 - 0.0.2
+       - Include lhash.[ch] in distributive

@@ -1,0 +1,48 @@
+dnl
+dnl Configure script pattern for absgw OpenRADIUS module.
+dnl
+dnl $Log: not supported by cvs2svn $
+dnl
+
+dnl Init autoconf
+AC_INIT(absgw.c)
+
+dnl Get canonical system information
+AC_CANONICAL_SYSTEM
+
+dnl Init automake
+AM_INIT_AUTOMAKE(absgw, 0.0.1)
+AM_CONFIG_HEADER(config.h)
+
+dnl Checks for programs.
+AC_PROG_CC
+AC_PROG_CPP
+AC_PROG_INSTALL
+AC_PROG_MAKE_SET
+AM_PROG_LIBTOOL
+
+dnl Checks for libraries.
+dnl AC_CHECK_LIB(abs_io, abs_v3, abs_msg, abs_ber)
+
+dnl Checks for header files.
+AC_HEADER_STDC
+AC_CHECK_HEADERS(constants.h platform.h sys/select.h sys/socket.h)
+
+AC_ARG_WITH(openradius-include-dir, [  --with-openradius-include-dir=LOC    OpenRADIUS include dir ])
+if test "X${with_openradius_include_dir}" != "X"; then
+   OPENRADIUS_INCLUDE_DIR=${with_openradius_include_dir}
+else
+   OPENRADIUS_INCLUDE_DIR=/usr/local/include/openradius
+fi
+AC_SUBST(OPENRADIUS_INCLUDE_DIR)
+
+AC_ARG_WITH(absware-include-dir, [  --with-absware-include-dir=LOC    absware include top dir ])
+if test "X${with_absware_include_dir}" != "X"; then
+   ABSWARE_INCLUDE_DIR=${with_absware_include_dir}
+else
+   ABSWARE_INCLUDE_DIR=.
+fi
+AC_SUBST(ABSWARE_INCLUDE_DIR)
+
+dnl Output gathered data
+AC_OUTPUT([Makefile])

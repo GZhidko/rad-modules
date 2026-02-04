@@ -1,0 +1,123 @@
+#!/usr/bin/perl -w
+#
+# Usage: gdbmfile-gen -h
+#
+
+=head1 NAME
+
+    gdbmfile-gen
+
+=head1 SYNOPSIS
+
+    gdbmfile-gen -h
+    gdbmfile-gen [-s text-file] [-f gdbm-file]
+
+=head1 DESCRIPTION
+
+Text file is a CSV-like file.
+
+Value separator -- '|' (pipe).
+
+Fields:
+
+=over
+
+=item 1
+
+Login
+
+=item 2
+
+Cleartext password or empty string
+
+=item 3
+
+Crypted password or empty string
+
+=item 4
+
+&-separated pairs of RADIUS attributes.
+
+=item 5
+
+NAS address or empty string
+
+=back
+
+=head1 AUTHOR
+
+Alexey Michurin <am@rol.ru>
+
+=cut
+
+
+use strict;
+use GDBM_File;
+use Getopt::Long;
+
+my $VERSION = '0.1';
+my $MODULE = 'gdbmfile-gen';
+
+my $gdbm_file = 'users.gdbm';
+my $source_file = 'users.txt';
+my $help = 0;
+my %DB;
+
+sub radq {
+    $_[0] =~ s{(.)}{
+        $a = ord($1);
+        ($a < 33 or $a > 126 or $a == 34 or $a == 39 or $a == 92) ?
+        sprintf('\\x%02x', $a) :
+        $1
+    }ge;
+}
+
+exit 1 unless (GetOptions(
+    'help' => \$help,
+    'source=s' => \$source_file,
+    'file=s' => \$gdbm_file));
+
+if ($help) {
+    print <<"TEXT";
+$MODULE $VERSION
+Usage: $MODULE -h
+       $MODULE -f file -s file
+TEXT
+    exit 0;
+}
+
+open FH, "<$source_file" or die "Can't open $source_file: $!\n";
+tie %DB, 'GDBM_File', $gdbm_file, &GDBM_WRCREAT, 0640 or die "Can't open $gdbm_file: $!\n";
+
+while (<FH>) {
+    chomp;
+    my @f = split(/\Q|/, $_, -1);
+    if ($#f != 3) {
+        warn "LEFT LINE: #f=$#f: $_\n";
+        next;
+    }
+    my ($login, $passwd, $crypted_passwd, $rad_attrs) = @f;
+    my $k = $login;
+    my @v = ();
+    if ($passwd) {
+        radq($passwd);
+        push @v, qq|clear-password = "$passwd"|;
+    }
+    if ($crypted_passwd) {
+        radq($crypted_passwd);
+        push @v, qq|crypted-password = "$crypted_passwd"\n|;
+    }
+    if ($rad_attrs) {
+        push @v, join("\n", split('&', $rad_attrs));
+    }
+    my $v = join("\n", @v);
+    print "---------- $k ----------\n$v\n";
+
+    if (exists($DB{$k})) {
+        warn "DUP: $k\n";
+    }
+    $DB{$k} = $v;
+}
+
+untie %DB;
+close FH;

@@ -1,0 +1,5 @@
+radre - Regex-based reply generator.
+
+Loads regex/response pairs from a config file, matches input str
+attributes, and emits the configured reply (with backreference
+substitutions) plus int=1.

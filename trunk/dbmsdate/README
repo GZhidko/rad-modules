@@ -1,0 +1,3 @@
+dbmsdate - Convert a numeric date attribute to DBMS string format.
+
+Takes a numeric 'date' attribute and returns str="YYYYmmdd HH:MM:SS".

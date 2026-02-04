@@ -1,0 +1,11 @@
+2009/11/12 - 0.0.4
+       - make config parser less capricious
+2009/01/26 - 0.0.3
+       - replace printf with write
+       - [elie] make global symbols more unique
+       - [elie] missing headers added
+       - [elie] return int, not str in the end
+2008/11/25 - 0.0.2
+       - Substitutions of matched text
+2008/11/19 - 0.0.1
+       - Init

@@ -1,0 +1,135 @@
+#include <string.h>
+#include <errno.h>
+#include <stdlib.h>
+#include "log.h"
+#include "table.h"
+#include "../stats_c.h"
+
+extern const char *stats_file;
+extern int stats_interval_min;
+#define KEYBUFFSIZE 1024
+#define RQBUFFSIZE  4096
+
+/* states of deterministic finite-state machine (DFA):
+   F -- passive (search for '\n')
+   S -- we are in line (search for 's', left '\t')
+   s,
+   t,
+   r -- letters
+   A -- optional spaces before '='
+   = -- is it
+   B -- optional spaces after '='
+   K -- reading key
+   C -- check '\n' after last '"'
+ */
+
+int find_key(char *s, char *slim, char *key) {
+  char *a, *k;
+  int ok = 0;
+  char st = 'S';
+  k = key;
+  for (a = s; a < slim && ok == 0; a++) {
+    switch (st) {
+      case 'F': if (*a == '\n') st = 'S';
+                break;
+      case 'S': switch (*a) {
+                  case '\n':
+                  case '\t': break;
+		  case 's': st = 's'; break;
+		  default:  st = 'F'; break;
+                } break;
+      case 's': if (*a == 't') st = 't';
+                else           st = 'F';
+                break;
+      case 't': if (*a == 'r') st = 'r';
+                else           st = 'F';
+                break;
+      case 'r':
+      case 'A': switch (*a) {
+                  case ' ': st = 'A'; break;
+                  case '=': st = '='; break;
+	          default:  st = 'F'; break;
+	        } break;
+      case '=':
+      case 'B': switch (*a) {
+                  case ' ': st = 'B'; break;
+                  case '"': st = 'K'; break;
+		  default:  st = 'F'; break;
+	        } break;
+      case 'K': if (*a == '"') st = 'C';
+                else           *k++ = *a;
+	        break;
+      case 'C': if (*a == '\n') *k = '\0', ok = 1;
+                else            k = key, st = 'F';
+	        break;
+    }
+  }
+  return ok;
+}
+
+void replay(char *s, char *slim) {
+  extern int debug;
+  char key[KEYBUFFSIZE];
+  char *rep;
+  size_t len, wlen;
+  if (find_key(s, slim, key)) {
+    if (debug) write_error("KEY: %s\n", key);
+    rep = get_record(key);
+    if (debug) write_error("REPALY:\n%s\n", rep);
+    len = strlen(rep);
+    wlen = write(1, rep, len);
+    if (len != wlen) {
+      write_error("Server not accept all data (data=%db; post=%db)\n", len, wlen);
+      exit(1);  /* XXX SERVER DIE */
+    }
+  } else {
+    write_error("PROTOCOL ERROR\n");
+    exit(1);  /* XXX SERVER DIE */
+  }
+}
+
+void main_loop() {
+  char rq[RQBUFFSIZE], *buff, *nbuff, *rq_start, *rq_end, *a;
+  int nl_cnt, taillen;
+  size_t n, l;
+  stats_c_t stats;
+  stats_c_init(&stats, "kvfile", stats_file, stats_interval_min);
+  buff = rq;
+  nl_cnt = 0;
+  rq_start = rq;
+  for (;;) {
+    l = buff - rq;
+    if (l >= RQBUFFSIZE) {
+      write_error("INLET OVERFILL (l=%d)\n", l);
+      exit(1);  /* XXX SERVER DIE */
+    }
+    n = read(0, buff, RQBUFFSIZE - l);
+    if (n == 0) {
+      write_error("Server close STDIN (server die?)\n");
+      exit(1);  /* XXX SERVER DIE */
+    }
+    if (n < 0) {
+      write_error("STDIN error: %s\n", strerror( errno ));
+      exit(1);  /* XXX SERVER DIE */
+    }
+    nbuff = buff + n;
+    for (a=buff; a<nbuff; a++) {
+      if (*a == '\n') nl_cnt++; else nl_cnt=0;
+      if (nl_cnt == 2) {
+        rq_end = a + 1;
+        uint64_t stats_start_ms = stats_c_now_ms();
+        replay(rq_start, rq_end);
+        stats_c_record(&stats, stats_c_now_ms() - stats_start_ms);
+	rq_start = rq_end;
+	nl_cnt = 0;
+      }
+    }
+    if (rq_start != rq) {
+      memmove(rq, rq_end, nbuff - rq_end);
+      rq_start = rq;
+      buff = rq + (nbuff - rq_end);
+    } else {
+      buff = nbuff;
+    }
+  }
+}

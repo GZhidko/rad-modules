@@ -1,0 +1,4 @@
+radclasspacker - Pack/unpack Class attributes.
+
+Encode mode (-i) packs all Class attributes into a single base64 str.
+Decode mode (-o) unpacks that str back into Class attributes.

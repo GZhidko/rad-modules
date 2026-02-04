@@ -1,0 +1,45 @@
+#include "loop.h"
+#include "parse.h"
+#include "proc.h"
+#include "log.h"
+#include <stdlib.h>
+
+void main_loop(int mode) {
+    eater_ctx c;
+    input_params_ctx ictx;
+    char buff[INPUT_BUFFER_SIZE];
+    char * b;
+    int n, a;
+    char debug[4000];
+    
+    eater_init(&c);
+    processor_init(&ictx, mode);
+
+    for(;;) {
+        n = read(0, buff, INPUT_BUFFER_SIZE);
+        log_escape_string(buff, n, debug, 4000);
+        write_debug("raw stdin: [%s]", debug);
+        if (n == 0) {
+            write_error("stdin closed");
+            break;
+        }
+        b = buff;
+        for(;;) {
+            a = eater_uppend(&c, b, n);
+            if (c.error_code == ER_PAIR_READY) {
+                processor_append(&ictx, &c);
+            } else if (c.error_code == ER_COMPLETE) {
+                processor_process(&ictx);
+            } else if (c.error_code != ER_UNDEF) {
+                eater_dump(&c);
+                exit(1);
+            }
+            n -= a;
+            if (n == 0) {
+                break;
+            }
+            b += a;
+        }
+    }
+}
+

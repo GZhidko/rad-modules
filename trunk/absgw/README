@@ -1,0 +1,5 @@
+absgw - OpenRADIUS <-> ABS gateway module.
+
+Reads OpenRADIUS request attributes from stdin, maps them to ABS v3
+request tables, sends the request to the ABS middleware, then maps the
+response back to RADIUS attributes on stdout.

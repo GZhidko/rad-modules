@@ -1,0 +1,4 @@
+mschap - MSCHAPv2 authentication and MPPE key generation.
+
+Validates MSCHAPv2 challenge/response locally or via ntlm_auth and
+returns int plus MPPE keys as str attributes on success.

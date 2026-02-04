@@ -1,0 +1,28 @@
+#!/bin/sh
+
+tmp="$0-TEMP"
+(
+find "${0%/*}/../src" \
+     -path '*/.svn' -prune -o -type f \
+     -a \( -name '*.cpp' -o -name '*.h' \) \
+     -print
+find "${0%/*}/../doc" \
+     "${0%/*}/../tools" \
+     -path '*/.svn' -prune -o -type f \
+     -print
+) |
+(
+while read i
+do
+  echo "- $i"
+  if test -e "$tmp"
+  then
+    echo "Temporary file '$tmp' exists!"
+    exit 1
+  fi
+  cat "$i" >"$tmp"
+  expand "$tmp" |
+  sed 's/[[:space:]]*$//' >"$i"
+  rm "$tmp"
+done
+)

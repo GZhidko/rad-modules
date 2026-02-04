@@ -1,0 +1,55 @@
+dnl
+dnl Configure script pattern for c-ascifile OpenRADIUS module.
+dnl
+dnl $Log: not supported by cvs2svn $
+dnl Revision 1.3  2007/10/23 05:29:06  michurin
+dnl - fix version number (configure.in, AM_INIT_AUTOMAKE)
+dnl
+dnl Revision 1.2  2007/10/06 09:38:25  ilya
+dnl afile renamed to kvfile (key-value file)
+dnl
+dnl Revision 1.1.1.1  2007/10/05 11:28:26  michurin
+dnl initial revision
+dnl
+dnl
+
+dnl Init autoconf
+AC_INIT(parser.l)
+
+dnl Get canonical system information
+AC_CANONICAL_SYSTEM
+
+dnl Init automake
+AM_INIT_AUTOMAKE(kvfile, 0.0.5, am@rol.ru)
+dnl - AM_CONFIG_HEADER(config.h)
+
+dnl Checks for programs.
+AC_PROG_CC
+dnl - AC_PROG_CPP
+AC_PROG_LEX
+AC_PROG_INSTALL
+AC_PROG_MAKE_SET
+dnl - AM_PROG_LIBTOOL
+
+dnl Checks for libraries.
+dnl AC_CHECK_LIB(ssl, crypto)
+
+dnl Checks for header files.
+AC_HEADER_STDC
+dnl AC_CHECK_HEADERS(openssl/lhash.h)
+
+dnl AC_ARG_WITH(openssl-dir, [  --with-openssl-dir=LOC    Openssl dir ])
+dnl if test "X${with_openssl_source_dir}" != "X"; then
+dnl    OPENSSL_INCLUDE_DIR=${with_openssl_dir}/include
+dnl else
+dnl    OPENSSL_INCLUDE_DIR=.
+dnl fi
+dnl if test \! -f "${OPENSSL_INCLUDE_DIR}/constants.h"; then
+dnl     AC_ERROR(Cannot build without Openssl)
+dnl else
+dnl     AC_WARN(Using Openssl include dir ${OPENSSL_INCLUDE_DIR})
+dnl fi
+dnl AC_SUBST(OPENSSL_INCLUDE_DIR)
+
+dnl Output gathered data
+AC_OUTPUT([Makefile])

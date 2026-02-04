@@ -1,0 +1,4 @@
+radinfologger - Info loggers.
+
+radinfologger (shell) writes concatenated str attributes to a file.
+radlogwriter (perl) writes the last str attribute with a timestamp.

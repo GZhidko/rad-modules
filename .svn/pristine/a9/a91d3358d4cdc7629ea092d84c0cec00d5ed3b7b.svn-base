@@ -1,0 +1,7 @@
+This is Openradius module for Retransmission Hints.
+For simple test: 
+    cd example/
+    gcc radclient.c -o radclient
+    ./multi_radclient -r path_to_multi_radclient/examples/radclient
+this test is echo-radclient which return the same package. For example,
+you may use path_to_multi_radclient/examples/input packages.

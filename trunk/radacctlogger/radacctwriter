@@ -1,0 +1,234 @@
+#!/usr/bin/perl -w
+#
+# OpenRADIUS module that dumps RADIUS accounting AV-pairs to a file
+# in legendary Livingston-style detail format,
+#
+# Usage: radacctwriter [-d][-p pidfile] destination-directory
+# 
+# The module uses the value of the first optional 'str' attribute from
+# incoming requests as a filename (possibly with direcrory part) to write
+# accounting data.
+#
+# Author: Ilya Etingof <elie@rol.ru>, 2008
+#
+# Permission to redistribute an original or modified version of this program in
+# source, intermediate or object code form is hereby granted exclusively under
+# the terms of the GNU General Public License, version 2. Please see the file
+# COPYING for details, or refer to http://www.gnu.org/copyleft/gpl.html.
+#
+# This code has been derived from Emile van Bergen's radsql module.
+#
+
+
+########
+# USES #
+########
+
+use Getopt::Long;
+use strict qw(vars);
+use POSIX qw(asctime);
+use File::Path;
+use Time::HiRes qw(time);
+
+###########
+# OPTIONS #
+###########
+
+my $progid = "radacctwriter";
+my $pid = "[" . $$ . "]";
+my $usage = 0;
+my $debug = 0;
+my $detaildir = "";
+my $detailfile = "";
+my $subdir;
+my $pidfile = "";
+my $line;
+my $stat_file;
+my $stat_interval = 5;
+
+########
+# MAIN #
+########
+
+# Get options
+
+Getopt::Long::Configure("bundling");
+GetOptions("h"  => \$usage,
+           "d" => \$debug,
+           "p=s" => \$pidfile,
+           "s=s" => \$stat_file,
+           "i=i" => \$stat_interval);
+
+if ($usage || !$ARGV[0]) {
+    die("Usage: $progid [-d] [-p pidfile] destination-directory\n" .
+        "       $progid -h\n");
+}
+
+$detaildir = $ARGV[0];
+
+# Check that we're running under OpenRADIUS, interface version 1
+
+unless ($debug ||
+    $ENV{'RADIUSINTERFACEVERSION'} &&
+    $ENV{'RADIUSINTERFACEVERSION'} == 1) {
+    die "not running under OpenRADIUS, interface v1!\n";
+}
+
+# PID file
+
+if ($pidfile) {
+    if (open(PID,"<$pidfile")) {
+        my $oldpid=<PID>;
+        close(PID);
+        if ($oldpid && kill(0, $oldpid)) {
+            die "ERROR: process $oldpid still running\n";
+        } else {
+            if ($debug) {
+                print STDERR "$progid$pid: stale pid file, improper shutdown?\n";
+            }
+        }
+    }
+    close (PID);
+
+    open(PID,">$pidfile") || die "Cannot open $pidfile: $!";
+    print PID "$$\n";
+    close(PID);
+
+    if ($debug) {
+        print STDERR "$progid$pid: wrote pid $$ to file $pidfile\n";
+    }
+}
+
+sub terminate {
+    if ($pidfile) {
+        unlink($pidfile);
+        if ($debug) {
+            print STDERR "$progid$pid: removed PID file $pidfile\n";
+        }
+    }
+    if ($debug) {
+        print STDERR "$progid$pid: terminated\n";
+    }
+    exit;
+}
+
+$SIG{'INT'}='terminate';
+$SIG{'TERM'}='terminate';
+$SIG{'HUP'}='terminate';
+$SIG{'QUIT'}='terminate';
+
+# Set record separator to empty line and loop on input.
+
+$/ = "\n\n";
+$| = 1;         # Important - we're outputting to a pipe
+
+my $stats_lib = $0;
+$stats_lib =~ s{/[^/]+$}{};
+require "$stats_lib/../stats.pl";
+stats_init($progid, $stat_file, $stat_interval);
+
+my $a;
+my $v;
+my $date;
+my %pairs;
+
+while(<STDIN>) {
+
+    my $start = time();
+    $detailfile = "";
+    $line = asctime(localtime(time()));
+
+    while(s/^\s*
+          ([A-Za-z0-9:-]+)               # attribute ($1)
+          \s*=\s*
+          (
+           (\d{1,3}.\d{1,3}.\d{1,3}.\d{1,3}).*|      # ip ($3)
+           (\d+).*|                      # int or date ($4)
+           \"([^\"]*)\".*|                # quoted str ($5)
+           ([^\"].*)                      # bare str ($6)
+           )
+          (\n|\$)//mx
+          )
+    {
+        $a = $1;
+        if (defined $4) {
+            $v = $4; 
+        } else {
+            if (defined $3) {
+                $v = $3;
+            } else {
+                if (defined $5) {
+                    if ($a eq "str") {
+                        if (!$detailfile) {
+                            $detailfile = $5;
+                            if ($debug) {
+                                print STDERR "$progid$pid: will write to $detaildir/$detailfile\n";
+                            }
+                            next;
+                        }
+                    }
+                    $v = "\"" . $5 . "\"";
+                } else {
+                    if (defined $6) {
+                        $v = $6;
+                    } else {
+                        print STDERR "$progid$pid: bad value for attr $a\n";
+                        next;
+                    }
+                }
+            }
+        }
+
+        if ($debug) {
+            print STDERR "$progid$pid: parsing:   a=[$a] v=[$v]\n";
+        }
+
+        $line = $line . "\t$a = $v\n";
+    }
+    
+    $line = $line . "\n";
+
+    if (!$detailfile) {
+        $detailfile = "detail";
+    }
+
+    if ($detailfile =~ /[\/]/) {
+      $subdir = $detailfile;
+      $subdir =~ s/\/[^\/]*$//; 
+    } else {
+      $subdir = "";
+    }
+
+    if (!opendir(DETAILDIR, "$detaildir/$subdir")) {
+        if (!mkpath(["$detaildir/$subdir"], 0, 0750)) {
+            print STDERR "$progid$pid: cannot mkpath $detaildir/$subdir: $!\n";
+            print "int=0\n\n";
+            next;
+        }
+        if ($debug) {
+            print STDERR "$progid$pid: created $detaildir/$subdir\n";
+        }
+    }
+    closedir(DETAILDIR);
+
+    if (!open(DETAILFD, ">>$detaildir/$detailfile")) {
+        print STDERR "$progid$pid: cannot write $detaildir/$detailfile: $!\n";
+        print "int=0\n\n";
+        next;
+    }
+    syswrite(DETAILFD, $line, length($line)); # hopefully atomic
+    close(DETAILFD);
+    
+    if ($debug) {
+        print STDERR "$progid$pid: record processed, returning: int=[1]\n";
+    }
+    print "int=1\n\n";
+    my $elapsed_ms = int((time() - $start) * 1000);
+    stats_record($elapsed_ms);
+}
+
+if ($debug) {
+    print STDERR "$progid$pid: EOF from stdin\n";
+}
+
+terminate();

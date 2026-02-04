@@ -1,0 +1,269 @@
+#!/usr/bin/perl -w
+#
+# Usage: gdbmauth -h
+#
+
+=head1 NAME
+
+    gdbmauth
+
+=head1 SYNOPSIS
+
+    gdbmauth -h
+    gdbmauth [-d] [-f gdbm-file]
+
+=head1 DESCRIPTION
+
+=head2 INPUT
+
+=head3 PAP
+
+    str = NAS-IP-Address
+    str = User-Name
+    str = User-Password
+    str = "PAP"
+
+=head3 CHAP
+
+    str = NAS-IP-Address
+    str = User-Name
+    str = ""
+    str = "CHAP"
+
+=head2 OUTPUT
+
+=head3 PAP
+
+    - int=1 -- OK
+    - int=0 -- FAIL
+
+=head3 CHAP
+
+    - clear-password = "password"
+      int=1 -- password found, chek it. (not OK yet!)
+    - int=0 -- password not found (FAIL)
+
+=head2 SEARCH ALGORITHM
+
+=over
+
+=item login@realm|NAS-IP
+
+Full login@realm on specified NAS
+
+=item login|NAS-IP
+
+Loing only on specified NAS
+
+=item login@realm|
+
+Full username on any NAS
+
+=item login|
+
+Login only on any NAS
+
+=back
+
+=head1 AUTHOR
+
+Alexey Michurin <am@rol.ru>
+
+=cut
+
+use strict;
+use POSIX qw(asctime);  ### ???
+use Getopt::Long;
+use GDBM_File;
+
+#####   G L O B A L S
+
+$/ = "\n\n";
+$| = 1;
+
+my $VERSION = '0.1';
+my $MODULE = 'gdbmauth';
+
+my $PID = "[$$]";
+
+my $verbose = '';
+my $help = '';
+my $gdbm_file = '/usr/local/etc/openradius/legacy/users.gdbm';
+
+my %DB;
+
+my $R_OK = "int=1\n\n";
+my $R_FAIL = "int=0\n\n";
+
+#####   S U B S
+
+sub logger {
+    my $s = $_[0];
+    my $t = substr(asctime(localtime(time())), 0, -1);
+    $s =~ s/\\/\\\\/g;
+    $s =~ s/\x0A/\\n/g;
+    $s =~ s/\x0D/\\r/g;
+    print STDERR "$t $MODULE $PID $s\n";
+}
+
+sub lexer {
+    my $s = $_[0];
+    my %r = ();
+    my $l = 1;
+    while ($s=~m{\G
+                 (?:                  # record...
+                     [[:blank:]]*
+                     ([A-Za-z0-9:_-]+)    # attribute ($1)
+                     [[:blank:]]*=[[:blank:]]*
+                     (?:
+                         ([^\"\n]+) |     # bare str or int or date or int ($2)
+                         \"([^\"\n]*)\" | # quoted str ($3)
+                     )
+                     \n
+                 |                    # ...or last line
+                     \n\z
+                 )
+                }gcx)
+    {
+        ++$l;
+        return \%r unless (defined $1);
+        $r{$1} = [] unless (exists $r{$1});
+        push @{$r{$1}}, (defined($2) ? $2 : $3);
+    }
+    return "Error in line $l"; # error
+}
+
+sub process {
+    my $i = $_[0];
+    logger("Request: [$i]") if ($verbose);
+    my $r = lexer($i);
+    unless (ref($r)) {
+        logger("Lexer can not parse request: [$r] (FATAL ERROR)");
+        exit 1;
+    }
+    unless (exists($r->{'str'})) {
+        logger("Lexer can not find 'str' in request");
+        return $R_FAIL;
+    }
+    unless ($#{$r->{'str'}} == 3) {
+        logger("Lexer can not find four values of 'str' in request. Found: " . join(', ', map {"'$_'"} @{$r->{'str'}}));
+        return $R_FAIL;
+    }
+    my ($nas_ip, $user, $passwd, $auth_type) = @{$r->{'str'}};
+    logger("Request: nas_ip [$nas_ip]") if ($verbose);
+    logger("Request: user   [$user]") if ($verbose);
+    logger("Request: passwd [$passwd]") if ($verbose);
+    logger("Request: auth_t [$auth_type]") if ($verbose);
+    my @strategy;
+    if ($user =~ m/@/) {
+        my ($login, $realm) = split(/\Q@/, $user, 2);
+        @strategy = (
+            "$user|$nas_ip",
+            "$login|$nas_ip",
+            "$user|",
+            "$login|",
+        );
+    } else {
+        @strategy = (
+            "$user|$nas_ip",
+            "$user|",
+        );
+    }
+    logger("Strategy: " . join(', ', map {"'$_'"} @strategy)) if ($verbose);
+    my $cred = undef;
+    foreach my $c (@strategy) {
+        logger("Check key: '$c'") if ($verbose);
+        if (exists $DB{$c}) {
+            $cred = $DB{$c};
+            logger("Check key: '$c': '$cred'") if ($verbose);
+            last;
+        }
+    }
+    unless (defined $cred) {
+        logger("Nothing matched. Return FALSE.");
+        return $R_FAIL;
+    }
+    my ($pass, $cpass, $radattrs) = split(/\Q|/, $cred, 3);
+    logger("DB: pass  [$pass]") if ($verbose);
+    logger("DB: cpass [$cpass]") if ($verbose);
+    logger("DB: rad   [$radattrs]") if ($verbose);
+    if (length($radattrs) > 0) {
+        $radattrs =~ s-&-\n-g;
+        $radattrs .= "\n";
+    }
+    if ($auth_type eq 'PAP') {
+        if (length($pass) > 0) {
+            logger("PAP: Try clear text password.") if ($verbose);
+            if ($passwd eq $pass) {
+                logger("OK. Retrun TRUE.") if ($verbose);
+                return qq|$radattrs$R_OK|;
+            } else {
+                logger("FAILED. Retrun FALSE.") if ($verbose);
+                return $R_FAIL;
+            }
+        } elsif (length($cpass) > 0) {
+            logger("PAP: Try crypted password.") if ($verbose);
+            my $salt = substr($cpass, 0, 2);
+            my $c = crypt($passwd, $salt);
+            if ($c eq $cpass) {
+                logger("OK. Retrun TRUE.") if ($verbose);
+                return qq|$radattrs$R_OK|;
+            } else {
+                logger("FAILED. Retrun FALSE.") if ($verbose);
+                return $R_FAIL;
+            }
+        } else {
+            logger("PAP: No password in database. Return FALSE.");
+            return $R_FAIL;
+        }
+    } elsif ($auth_type eq 'CHAP') {
+        if (length($pass) > 0) {
+            logger("CHAP: Continue in radius.") if ($verbose);
+            $pass =~ s{(.)}{
+                $a = ord($1);
+                ($a < 33 or $a > 126 or $a == 34 or $a == 39 or $a == 92) ?
+                sprintf('\\x%02x', $a) :
+                $1
+            }ge;
+            return qq|${radattrs}clear-password="$pass"\n$R_OK|;
+        } else {
+            logger("CHAP: No password in database. Return FALSE.");
+            return $R_FAIL;
+        }
+    } else {
+        logger("Unknown auth type '$auth_type'. Return FALSE.");
+        return $R_FAIL;
+    }
+    return $R_FAIL;
+}
+
+#####   M A I N
+
+exit 1 unless (GetOptions(
+    'debug' => \$verbose,
+    'help' => \$help,
+    'file=s' => \$gdbm_file));
+
+if ($help) {
+    print <<"TEXT";
+$MODULE $VERSION
+Usage: $MODULE -h
+       $MODULE -d
+       $MODULE -f file
+TEXT
+    exit 0;
+}
+
+#####   P R E P A R E
+
+tie %DB, 'GDBM_File', $gdbm_file, &GDBM_READER, 0640 or die "Can't open $gdbm_file: $!\n";
+
+#####   L O O P
+
+while (<STDIN>) {
+    my $r = process($_);
+    logger("Response: [$r]") if ($verbose);
+    print STDOUT $r;
+}
+
+#####   E O F

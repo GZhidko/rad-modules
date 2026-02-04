@@ -1,0 +1,4 @@
+unhex - Decode hex-encoded strings.
+
+Takes the first str value as hex, decodes it to bytes, and returns it as
+str plus int=1 (int=0 on missing input).

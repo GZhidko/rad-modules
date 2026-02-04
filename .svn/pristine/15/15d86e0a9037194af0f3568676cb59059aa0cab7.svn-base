@@ -1,0 +1,136 @@
+#!/usr/bin/perl -w
+#
+# OpenRADIUS module that get its first str value, check it
+# and echos it back into radius core.
+#
+# Usage: radecho [-h] [-d]
+# 
+# Author: Alexey Michurin <am@rol.ru>, 2010
+#
+# Permission to redistribute an original or modified version of this program in
+# source, intermediate or object code form is hereby granted exclusively under
+# the terms of the GNU General Public License, version 2. Please see the file
+# COPYING for details, or refer to http://www.gnu.org/copyleft/gpl.html.
+#
+
+use strict;
+use POSIX qw(asctime);
+use Getopt::Long;
+
+#####   CONSTANTS
+
+my $VERSION = '0.1';
+
+$/ = "\n\n";
+$| = 1;
+
+my $mod = 'radecho';
+my $pid = "[$$]";
+
+my $verbose = '';
+my $help = '';
+
+#####   S U B S
+
+sub logger {
+    my $s = $_[0];
+    my $t = substr(asctime(localtime(time())), 0, -1);
+    $s =~ s/\\/\\\\/g;
+    $s =~ s/\x0A/\\n/g;
+    $s =~ s/\x0D/\\r/g;
+    print STDERR "$t $mod$pid $s\n";
+}
+
+sub lexer {
+    my $s = $_[0];
+    my %r = ();
+    my $l = 1;
+    while ($s=~m{\G
+                 (?:                  # record...
+                     [[:blank:]]*
+                     ([A-Za-z0-9:_-]+)    # attribute ($1)
+                     [[:blank:]]*=[[:blank:]]*
+                     (?:
+                         ([^\"\n]+) |     # bare str or int or date or int ($2)
+                         \"([^\"\n]*)\" | # quoted str ($3)
+                     )
+                     \n
+                 |                    # ...or last line
+                     \n\z
+                 )
+                }gcx)
+    {
+        ++$l;
+        return \%r unless (defined $1);
+        $r{$1} = [] unless (exists $r{$1});
+        push @{$r{$1}}, (defined($2) ? $2 : $3);
+    }
+    return "Error in line $l"; # error
+}
+
+sub process {
+    my $i = $_[0];
+    logger("Request: [$i]") if ($verbose);
+    my $r = lexer($i);
+    unless (ref($r)) {
+        logger("Lexer can not parse request: [$r] (FATAL ERROR)");
+        exit 1;
+    }
+    unless (exists($r->{'str'})) {
+        logger("Lexer can not find 'str' in request");
+        return undef;
+    }
+    unless ($#{$r->{'str'}} >= 0) {
+        logger("Lexer can not find value of 'str' in request");
+        return undef;
+    }
+    my $s = $r->{'str'}[0];
+    my $p = $s;
+    logger("Get string: [$s]") if ($verbose);
+    $s =~ s{\\(?:x
+               ([0-9a-fA-F][0-9a-fA-F]) |
+               (.))
+           }
+           {
+               defined($1) ? chr(hex($1)) : $2
+           }egx;
+    logger("Unquote string to: [$s]") if ($verbose);
+    my $q = lexer("$s\n\n");
+    unless (ref($q)) {
+        logger("Lexer can not parse str as valid response: [$p]: $q");
+        return undef;
+    }
+    return $s;
+}
+
+#####   M A I N
+
+exit 1 unless (GetOptions('debug' => \$verbose, 'help' => \$help));
+
+if ($help) {
+    print <<"TEXT";
+$mod $VERSION
+Usage: $mod -h
+       $mod -d
+TEXT
+    exit 0;
+}
+
+#####   L O O P
+
+while (<STDIN>) {
+
+    my $r = process($_);
+    if (defined $r) {
+        $r .= "\nint=1\n\n";
+    } else {
+        $r = "int=0\n\n";
+    }
+
+    logger("Response: [$r]") if ($verbose);
+
+    print STDOUT $r;
+
+}
+
+#####   E O F

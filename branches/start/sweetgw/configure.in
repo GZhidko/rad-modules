@@ -1,0 +1,61 @@
+dnl
+dnl Configure script pattern for sweetgw OpenRADIUS module.
+dnl
+dnl $Log: not supported by cvs2svn $
+dnl
+
+dnl Init autoconf
+AC_INIT(sweetgw.c)
+
+dnl Get canonical system information
+AC_CANONICAL_SYSTEM
+
+dnl Init automake
+AM_INIT_AUTOMAKE(sweetgw, 0.0.1)
+AM_CONFIG_HEADER(config.h)
+
+dnl Checks for programs.
+AC_PROG_CC
+AC_PROG_CPP
+AC_PROG_INSTALL
+AC_PROG_MAKE_SET
+AM_PROG_LIBTOOL
+
+dnl Checks for libraries.
+dnl AC_CHECK_LIB(sweetuam)
+
+dnl Checks for header files.
+AC_HEADER_STDC
+AC_CHECK_HEADERS(constants.h platform.h sys/select.h sys/socket.h)
+
+AC_ARG_WITH(openradius-source-dir, [  --with-openradius-source-dir=LOC    OpenRADIUS source-tree dir ])
+if test "X${with_openradius_source_dir}" != "X"; then
+   OPENRADIUS_INCLUDE_DIR=${with_openradius_source_dir}/common
+else
+   OPENRADIUS_INCLUDE_DIR=.
+fi
+if test \! -f "${OPENRADIUS_INCLUDE_DIR}/constants.h"; then
+    AC_ERROR(Cannot build without OpenRADIUS source tree)
+else
+    AC_WARN(Using OpenRADIUS include dir ${OPENRADIUS_INCLUDE_DIR})
+fi
+AC_SUBST(OPENRADIUS_INCLUDE_DIR)
+
+AC_ARG_WITH(sweetspot-source-dir, [  --with-sweetspot-source-dir=LOC    Sweetspot source-tree dir ])
+if test "X${with_sweetspot_source_dir}" != "X"; then
+   SWEETSPOT_INCLUDE_DIR=${with_sweetspot_source_dir}
+else
+   SWEETSPOT_INCLUDE_DIR=.
+fi
+if test \! -f "${SWEETSPOT_INCLUDE_DIR}/uamclt.h"; then
+    AC_ERROR(Cannot build without Sweetspot source tree)
+else
+    AC_WARN(Using Sweetspot include dir ${SWEETSPOT_INCLUDE_DIR})
+fi
+AC_SUBST(SWEETSPOT_INCLUDE_DIR)
+
+SWEETSPOT_LIB_DIR=${SWEETSPOT_INCLUDE_DIR}
+AC_SUBST(SWEETSPOT_LIB_DIR)
+
+dnl Output gathered data
+AC_OUTPUT([Makefile])

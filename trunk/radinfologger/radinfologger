@@ -1,0 +1,135 @@
+#!/bin/sh
+#
+# This file is in the public domain
+
+# Process options - or how to do getopt(3) in shell scripts ;-)
+DEBUG=0
+USAGE=0
+STATFILE=
+STAT_INTERVAL_MIN=5
+while [ -n "$1" ]	# Loop as long as $1 is nonempty
+do
+	case $1 in
+		-d)
+			DEBUG=1
+			shift
+			;;
+		-o)
+			# Used to redirect fd 2 (where debugging output
+			# normally goes) to a file - same as server itself
+			if [ ! "$2" = "" ]
+			then
+				exec 2>$2
+				shift;
+			else
+				echo ERROR: Option -o requires an argument 1>&2
+				USAGE=1
+			fi
+			shift
+			;;
+		-s)
+			if [ ! "$2" = "" ]
+			then
+				STATFILE=$2
+				shift
+			else
+				echo ERROR: Option -s requires an argument 1>&2
+				USAGE=1
+			fi
+			shift
+			;;
+		-i)
+			if [ ! "$2" = "" ]
+			then
+				STAT_INTERVAL_MIN=$2
+				shift
+			else
+				echo ERROR: Option -i requires an argument 1>&2
+				USAGE=1
+			fi
+			shift
+			;;
+		-h)
+			USAGE=1
+			shift
+			;;
+		*)
+			# If this is not the last argument, it's an
+			# unknown option - complain. Otherwise it's
+			# the positional argument, and we're done
+			# with the loop.
+			if [ -n "$2" ] 	    # If $2 is nonempty, $1 is not last
+			then
+				echo ERROR: Unknown option $1 1>&2
+				USAGE=1
+				shift
+			else
+				break
+			fi
+			;;
+	esac
+done
+
+if [ -z "$1" ]
+then
+	echo ERROR: No destination file specified 1>&2
+	USAGE=1
+fi
+DESTFILE=$1
+
+if [ $USAGE = 1 ]
+then
+	echo "Usage: radinfologger [-d][-o file][-s statfile][-i minutes] destination-file" 1>&2
+	echo "       radinfologger -h" 1>&2
+	exit 1
+fi
+
+trap "echo \"radinfologger[$$]: mommy hates me\" 1>&2" TERM
+
+STATSDIR=$(dirname "$0")
+. "$STATSDIR/../stats.sh"
+stats_init "radinfologger" "$STATFILE" "$STAT_INTERVAL_MIN"
+
+# Loop, answering requests
+while : 
+do
+	START_MS=$(stats_now_ms)
+	# Read message
+	OUTPUT=
+	IFS='='
+	while read ATR VAL && [ -n "$VAL" ]
+	do
+		IFS=' '
+		if [ "str" = "$ATR" ]
+		then
+			# Add pair. Note the real tab before $ATR
+			OUTPUT="$OUTPUT$VAL"
+		else
+			echo "radinfologger[$$]: ignoring attribute $ATR" 1>&2
+		fi
+		IFS='='
+	done
+	IFS=' '
+
+	# Show debugging output if requested
+	[ $DEBUG = 1 ] && echo "radinfologger[$$]: $OUTPUT" 1>&2
+
+	# Log output to file
+	echo $OUTPUT >> $DESTFILE
+	if [ ! $? ]; then
+		echo "radinfologger[$$]: >> $DESTFILE failed" 1>&2
+		echo "int=0
+"
+		continue
+	fi
+
+	# Reply
+#	sleep 1		# testing only - don't worry, we're race-free ;-)
+	echo "int=1
+"
+
+	END_MS=$(stats_now_ms)
+	ELAPSED=$((END_MS - START_MS))
+	stats_record "$ELAPSED"
+
+done

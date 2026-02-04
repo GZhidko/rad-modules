@@ -1,0 +1,53 @@
+#!/bin/bash
+#
+# Rotate openradius logs several times a day
+#
+# $Log$
+#
+
+PATH=/usr/local/bin:$PATH
+
+if [ X"" != X"$1" ]; then
+    suffix=$(date -d "$1" +%Y%m%d%H%M)
+else
+    suffix=$(date +%Y%m%d%H%M)
+fi
+oldsuffix=$(date -d '2 weeks ago' +%Y%m%d)
+targetdir=/var/log/openradius
+openradius=openradius.log
+radiusd=radiusd.log
+
+[ ! -x "$targetdir" ] && { echo "$targetdir not accessible"; exit -1; }
+
+if [ -w "$targetdir/$openradius" ]; then
+    if [ -f "$targetdir/$openradius.$suffix" ]; then
+      echo "WARNING: $targetdir/$openradius.$suffix already exists"
+    else
+      mv "$targetdir/$openradius" "$targetdir/$openradius.$suffix" && {
+        ( nice gzip -9 "$targetdir/$openradius.$suffix" & )
+      }
+    fi
+else
+  echo "WARNING: $targetdir/$openradius not available"
+fi
+
+for f in $targetdir/$openradius.$oldsuffix*.gz; do
+  [ -f "$f" ] && rm "$f"
+done
+
+if [ -w "$targetdir/$radiusd" ]; then
+    if [ -f "$targetdir/$radiusd.$suffix" ]; then
+      echo "WARNING: $targetdir/$radiusd.$suffix already exists"
+    else
+        nice cp -p "$targetdir/$radiusd" "$targetdir/$radiusd.$suffix" && {
+            cat /dev/null > "$targetdir/$radiusd"
+            ( nice gzip -9 "$targetdir/$radiusd.$suffix" & )
+        }
+    fi
+else
+  echo "WARNING: $targetdir/$radiusd not available"
+fi
+
+for f in $targetdir/$radiusd.$oldsuffix*.gz; do
+  [ -f "$f" ] && rm "$f"
+done

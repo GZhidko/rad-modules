@@ -1,0 +1,6 @@
+#!/bin/sh
+
+for i in csv2gdbm gdbmauth
+do
+  pod2man "$i" >"$i.man"
+done

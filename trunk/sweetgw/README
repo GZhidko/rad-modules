@@ -1,0 +1,4 @@
+sweetgw - OpenRADIUS <-> Sweetspot gateway module.
+
+Builds a command from string attributes, sends it to the Sweetspot
+service, and maps the response to RADIUS attributes.

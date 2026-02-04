@@ -1,0 +1,62 @@
+#!/bin/sh
+
+DB_SOURCE='test-users.txt'
+GDBM_FILE='test-users.gdbm'
+OUT_FILE='test-out'
+ERR_FILE='test-err'
+
+rm "$GDBM_FILE"
+./csv2gdbm -s "$DB_SOURCE" -f "$GDBM_FILE" || exit 1
+
+cat <<'TEXT' |
+str="10.20.30.2"
+str="vasya"
+str="clearpassword"
+str="PAP"
+
+str="10.20.30.2"
+str="pap-vasya"
+str="clearpasswd"
+str="PAP"
+
+str="10.20.30.2"
+str="vasya"
+str="--"
+str="CHAP"
+
+str="10.20.30.2"
+str="1-9-vasya"
+str="123456789"
+str="PAP"
+
+str="10.20.30.2"
+str="quot"
+str="--"
+str="CHAP"
+
+str="10.20.30.2"
+str="pap-vasya"
+str=""
+str="PAP"
+
+str="10.20.30.2"
+str="pap-vasya-not-exists@realm"
+str=""
+str="PAP"
+
+str="10.20.30.2"
+str="pap-vasya"
+str=""
+str="CHAP"
+
+str="10.20.30.2"
+str="pap-vasya"
+str=""
+str="unknown"
+
+TEXT
+./gdbmauth -f "$GDBM_FILE" -d >"$OUT_FILE" 2>"$ERR_FILE"
+echo '== ERR =='
+cat "$ERR_FILE" | sed 's-^-[E] -'
+echo '== OUT =='
+cat "$OUT_FILE" | sed 's-^-[O] -'

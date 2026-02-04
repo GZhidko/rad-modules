@@ -1,0 +1,4 @@
+bcgw - OpenRADIUS module that evaluates expressions via /usr/bin/bc.
+
+Consumes string attributes as expressions, sends them to bc, and returns
+results as string attributes (plus int=1/0 status).

@@ -1,0 +1,7 @@
+= allow retries/timeout and SNMP version (v1/v2c) settings to be passed
+  to snmpgw through command line and/or incoming avpairs
+= write a README file with minimum details on how to use this tool
+= an example script that would talk to snmpd@localhost may be easier to try
+= OR modules traditionally return two rc's - one for themselves and the other
+  to indicate protocol-specific errors. Maybe it's worth to investigate and
+  following this approach for usage consistency.

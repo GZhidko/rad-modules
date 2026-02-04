@@ -1,0 +1,4 @@
+radecho - Echo helper for OpenRADIUS.
+
+Reads the first str value, validates it as a response snippet, and
+returns it back to the core with int=1.

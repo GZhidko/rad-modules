@@ -1,0 +1,10 @@
+dnl
+dnl Configure script pattern for radb64 OpenRADIUS module.
+dnl
+
+AC_PREREQ(2.59)
+AC_INIT([radb64], [0.0.2], [am@rol.ru])
+AM_INIT_AUTOMAKE([1.9 foreign])
+AC_PROG_CC
+AC_CONFIG_FILES([Makefile])
+AC_OUTPUT

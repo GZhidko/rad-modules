@@ -1,0 +1,11 @@
+AC_PREREQ(2.59)
+AC_INIT([radmppe], [0.2.2], [am@rol.ru])
+AM_INIT_AUTOMAKE([1.9 foreign])
+AC_PROG_CC
+dnl AC_SEARCH_LIBS( MD5, ssl )
+dnl AC_SEARCH_LIBS(MD5Init, md5)    # Sun
+dnl AC_CHECK_FUNCS(MD5Init MD5Update MD5Final)
+dnl AC_SEARCH_LIBS(MD5_Init, ssl)   # Linux, FreeBSD
+dnl AC_CHECK_FUNCS(MD5_Init MD5_Update MD5_Final)
+AC_CONFIG_FILES([Makefile])
+AC_OUTPUT
