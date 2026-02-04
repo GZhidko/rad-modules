@@ -32,6 +32,27 @@ void write_error(char *fmt, ...);
 int debug = 0;
 static const char *stats_file;
 static int stats_interval_min = 5;
+static int no_external;
+
+static int append_escaped(char *dst, int dstsz, const char *src) {
+  int i, j;
+  for (i = 0, j = 0; src[i] && j < dstsz - 1; i++) {
+    char c = src[i];
+    if (c == '\"' || c == '\\\\') {
+      if (j + 2 >= dstsz) break;
+      dst[j++] = '\\\\';
+      dst[j++] = c;
+    } else if (c == '\\n') {
+      if (j + 2 >= dstsz) break;
+      dst[j++] = '\\\\';
+      dst[j++] = 'n';
+    } else {
+      dst[j++] = c;
+    }
+  }
+  dst[j] = '\\0';
+  return j;
+}
 
 /****************************************************************/
 
@@ -46,6 +67,8 @@ int process_args(int argc, char *argv[], char **client_type) {
       if (strcmp("-d", argv[i]) == 0) {
         debug = 1;
         write_error("Debugging ON\n");
+      } else if (strcmp("-n", argv[i]) == 0) {
+        no_external = 1;
       } else if (strcmp("-s", argv[i]) == 0) {
         if (++i < argc) stats_file = argv[i];
         else {
@@ -65,7 +88,7 @@ int process_args(int argc, char *argv[], char **client_type) {
            fprintf(stderr, "Invalid parametr '%s'\n", argv[i]);
 	}
         fprintf(stderr,
-               "USAGE: %s [-h] [-d] [-t type] [-s statfile] [-i minutes]\n"
+               "USAGE: %s [-h] [-d] [-n] [-t type] [-s statfile] [-i minutes]\n"
 	       "Where \"type\" -- label for the config file\n",
 	       argv[0]);
         return 1;
@@ -533,33 +556,48 @@ int main(int argc, char ** argv)
     rc = get_strings(or_buffer, or_args);
     if (rc == ERROR_OK) {
       uint64_t stats_start_ms = stats_c_now_ms();
-      snmp_client(or_args[0],
-                  or_args[1],
-  	          or_args[2],
-	          or_args[3],
-	          or_args[4][0],
-	          or_args[5],
-	          &rc,
-	          &snmp_error,
-	          &out_oid,
-	          &out_type,
-	          out_value);
-      if (rc == 0) {
-        snprintf(or_out_buffer, OR_BUFFER_SIZE,
-                 "str=\"%d\"\n" /* rc -- error code */
-		 "str=\"%s\"\n" /* error description */
-		 "str=\"%s\"\n" /* oid */
-		 "str=\"%c\"\n" /* type */
-         "str=\"%s\"\n" /* value */
-         "int=1\n\n",
-         rc, snmp_error, out_oid, out_type, out_value);
-	write(1, or_out_buffer, strlen(or_out_buffer));
+      if (no_external) {
+        int pos = 0;
+        int i;
+        for (i = 0; i < OUT_STRING_COUNT; i++) {
+          if (!or_args[i]) break;
+          pos += snprintf(or_out_buffer + pos, OR_BUFFER_SIZE - pos, "str=\\\"");
+          pos += append_escaped(or_out_buffer + pos, OR_BUFFER_SIZE - pos, or_args[i]);
+          pos += snprintf(or_out_buffer + pos, OR_BUFFER_SIZE - pos, "\\\"\\n");
+          if (pos >= OR_BUFFER_SIZE - 8) break;
+        }
+        snprintf(or_out_buffer + pos, OR_BUFFER_SIZE - pos, "int=1\\n\\n");
+        write(1, or_out_buffer, strlen(or_out_buffer));
         stats_c_record(&stats, stats_c_now_ms() - stats_start_ms);
       } else {
-        write_error("SNMP error %d: %s\n", rc, snmp_error);
-	if (rc >= -3) {
-          return 2; /* fatal error */
-	}
+        snmp_client(or_args[0],
+                    or_args[1],
+    	            or_args[2],
+	            or_args[3],
+	            or_args[4][0],
+	            or_args[5],
+	            &rc,
+	            &snmp_error,
+	            &out_oid,
+	            &out_type,
+	            out_value);
+        if (rc == 0) {
+          snprintf(or_out_buffer, OR_BUFFER_SIZE,
+                   "str=\"%d\"\n" /* rc -- error code */
+		   "str=\"%s\"\n" /* error description */
+		   "str=\"%s\"\n" /* oid */
+		   "str=\"%c\"\n" /* type */
+		   "str=\"%s\"\n" /* value */
+		   "int=1\n\n",
+		   rc, snmp_error, out_oid, out_type, out_value);
+	  write(1, or_out_buffer, strlen(or_out_buffer));
+          stats_c_record(&stats, stats_c_now_ms() - stats_start_ms);
+        } else {
+          write_error("SNMP error %d: %s\n", rc, snmp_error);
+	  if (rc >= -3) {
+            return 2; /* fatal error */
+	  }
+        }
       }
     } else {
       write_error("Radius error %d\n", rc);

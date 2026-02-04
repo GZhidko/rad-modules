@@ -6,6 +6,7 @@
 
 const char *stats_file = NULL;
 int stats_interval_min = 5;
+int no_external = 0;
 
 int _process_args(int argc, char *argv[], int *debug_level,
                   char **hostname, int *port, int *timeout, char **bootfile) {
@@ -88,6 +89,9 @@ int _process_args(int argc, char *argv[], int *debug_level,
                 return -1;
             }
             break;
+        case 'n':
+            no_external = 1;
+            break;
         default:
             printf("bad option\n");
             return 1;
@@ -108,7 +112,8 @@ void process_args(int argc, char *argv[], int *debug_level,
                "                          -t timeout\n"
                "                          -i redis initial commands\n"
                "                          -S statfile\n"
-               "                          -I minutes\n");
+               "                          -I minutes\n"
+               "                          -n (no external)\n");
         exit(1);
   }
 }

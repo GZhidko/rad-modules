@@ -58,13 +58,14 @@ static int debug;
 int global_debug_flag; /* XXX */
 static const char *stats_file;
 static int stats_interval_min = 5;
+static int no_external;
 
 /*
  * FUNCTIONS
  */
 
 static void usage() {
-    fprintf(stderr, "Usage: sweetgw [-h?] [-v] [-d] [-c config-file] [-s statfile] [-i minutes]\n");
+    fprintf(stderr, "Usage: sweetgw [-h?] [-v] [-d] [-n] [-c config-file] [-s statfile] [-i minutes]\n");
     _exit(1);
 }
 
@@ -136,11 +137,14 @@ int main(int argc, char **argv) {
     */
 
     /* Handle options */
-    while((c = getopt(argc, argv, "?hvdc:s:i:")) != -1) {
+    while((c = getopt(argc, argv, "?hvdc:s:i:n")) != -1) {
         switch(c) {
         case 'd': 
           debug++; 
           global_debug_flag = 5;
+          break;
+        case 'n':
+          no_external = 1;
           break;
         case 's':
           stats_file = optarg;
@@ -260,6 +264,34 @@ int main(int argc, char **argv) {
 
         if (debug)
           msg("%s built %d-element UAM vector", func, sw_argc);
+
+        if (no_external) {
+          o = msgbuf + set_acknak(msgbuf, 1) / 4; /* ACK */
+          for(sw_argc=0;sw_argv[sw_argc]; sw_argc++) {
+            m = strlen(sw_argv[sw_argc]);
+            if (((o - msgbuf + 4 + ((m + 3) >> 2)) << 2) >= C_MAX_MSGSIZE) {
+              msg("%s no more room for attribute %d", func, avpair_idx);
+              exit(-1);
+            }
+            memcpy(&(o[4]), sw_argv[sw_argc], m);
+            o[0] = htonl(C_DS_INTERNAL);
+            o[1] = htonl(C_VND_ANY);
+            o[2] = htonl(C_DI_STR);
+            o[3] = htonl(m);
+            o += 4 + ((m + 3) >> 2);
+          }
+          m = (o - msgbuf) << 2;
+          msgbuf[1] = htonl(m);
+          if (write(1, msgbuf, m) != m) { 
+            perror("sweetgw: write");
+            exit(-1);
+          }
+          if (stats_pending) {
+            stats_c_record(&stats, stats_c_now_ms() - stats_start_ms);
+            stats_pending = 0;
+          }
+          continue;
+        }
 
         if (sw_uam_send_msg(group, sw_argv) == -1) {
           len = set_acknak(msgbuf, -1);

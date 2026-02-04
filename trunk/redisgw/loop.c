@@ -13,6 +13,27 @@
 
 extern const char *stats_file;
 extern int stats_interval_min;
+extern int no_external;
+
+static int append_escaped(char *dst, int dstsz, const char *src, int len) {
+    int i, j;
+    for (i = 0, j = 0; i < len && j < dstsz - 1; i++) {
+        char c = src[i];
+        if (c == '\"' || c == '\\\\') {
+            if (j + 2 >= dstsz) break;
+            dst[j++] = '\\\\';
+            dst[j++] = c;
+        } else if (c == '\\n') {
+            if (j + 2 >= dstsz) break;
+            dst[j++] = '\\\\';
+            dst[j++] = 'n';
+        } else {
+            dst[j++] = c;
+        }
+    }
+    dst[j] = '\\0';
+    return j;
+}
 
 void main_loop(char *hostname, int port, int timeout, char *bootfile) {
     eater_ctx c;
@@ -107,8 +128,27 @@ void main_loop(char *hostname, int port, int timeout, char *bootfile) {
                 processor_append(&ictx, &c);
             } else if (c.error_code == ER_COMPLETE) {
                 processor_pop(&ictx, &argc, &argv, &argvlen);
-                redis_process(&rctx, argc, argv, argvlen, 
-                              obuff, sizeof(obuff));
+                if (no_external) {
+                    int pos = 0;
+                    int i;
+                    for (i = 0; i < argc; i++) {
+                        int n = snprintf(obuff + pos, sizeof(obuff) - pos, "str=\\\"");
+                        if (n < 0 || n >= (int)sizeof(obuff) - pos) break;
+                        pos += n;
+                        pos += append_escaped(obuff + pos, sizeof(obuff) - pos, argv[i], argvlen[i]);
+                        n = snprintf(obuff + pos, sizeof(obuff) - pos, "\\\"\\n");
+                        if (n < 0 || n >= (int)sizeof(obuff) - pos) break;
+                        pos += n;
+                    }
+                    if (pos < (int)sizeof(obuff) - 6) {
+                        strcpy(obuff + pos, "int=1\\n\\n");
+                    } else {
+                        strcpy(obuff, "int=0\\n\\n");
+                    }
+                } else {
+                    redis_process(&rctx, argc, argv, argvlen, 
+                                  obuff, sizeof(obuff));
+                }
                 write(1, obuff, strlen(obuff));
                 if (stats_pending) {
                     stats_c_record(&stats, stats_c_now_ms() - stats_start_ms);

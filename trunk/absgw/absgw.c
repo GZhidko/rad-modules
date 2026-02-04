@@ -74,13 +74,14 @@
 static int debug;
 static const char *stats_file;
 static int stats_interval_min = 5;
+static int no_external;
 
 /*
  * FUNCTIONS
  */
 
 static void usage() {
-    fprintf(stderr, "Usage: " PACKAGE " [-h?] [-v] [-V] [-d] [-t ttl] [-s statfile] [-I minutes] <-c abs-service-id > < -i input-attr-map > < -o output-attr-map >\n");
+    fprintf(stderr, "Usage: " PACKAGE " [-h?] [-v] [-V] [-d] [-n] [-t ttl] [-s statfile] [-I minutes] <-c abs-service-id > < -i input-attr-map > < -o output-attr-map >\n");
     exit(EX_USAGE);
 }
 
@@ -300,13 +301,16 @@ int main(int argc, char **argv) {
     */
 
     /* Handle options */
-    while((c = getopt(argc, argv, "?hvVd1t:c:i:o:s:I:")) != -1) {
+    while((c = getopt(argc, argv, "?hvVdn1t:c:i:o:s:I:")) != -1) {
         switch(c) {
         case 's':
           stats_file = optarg;
           break;
         case 'I':
           stats_interval_min = atoi(optarg);
+          break;
+        case 'n':
+          no_external = 1;
           break;
         case '1':
           abs_oneway_flag = 1;
@@ -478,7 +482,19 @@ int main(int argc, char **argv) {
         }
 
         if (debug)
-            logit("%s %d-octet msg recved from radius core", func, len-6);
+          logit("%s %d-octet msg recved from radius core", func, len-6);
+
+        if (no_external) {
+          if (write(1, msgbuf, len) != len) {
+            perror(PACKAGE ": write");
+            exit(EX_IOERR);
+          }
+          if (stats_pending) {
+            stats_c_record(&stats, stats_c_now_ms() - stats_start_ms);
+            stats_pending = 0;
+          }
+          continue;
+        }
 
         e = msgbuf + (len >> 2);
         col = 0; avpair_idx = 0;
