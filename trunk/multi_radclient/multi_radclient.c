@@ -1,5 +1,6 @@
 #include "multi_radclient.h"
 #include "../stats_c.h"
+#include <stdlib.h>
 
 /*
 Counter for id

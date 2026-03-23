@@ -1,4 +1,5 @@
 #include "args.h"
+#include <stdlib.h>
 
 int process_args(int argc, char *argv[]) {
     int i, j;

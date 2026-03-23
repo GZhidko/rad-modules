@@ -80,10 +80,12 @@ void universal_write(char * mode, char * fmt, va_list ap)
     char s[BUFF_SIZE];
     char o[BUFF_SIZE];
     time_t stamp;
+    struct tm stamp_tm;
     char stamp_buff[26];
     
     stamp = time(&stamp);
-    asctime_r(localtime(&stamp), stamp_buff);
+    localtime_r(&stamp, &stamp_tm);
+    asctime_r(&stamp_tm, stamp_buff, sizeof(stamp_buff));
     stamp_buff[24] = '\0';
     
     vsnprintf(s, BUFF_SIZE, fmt, ap);
