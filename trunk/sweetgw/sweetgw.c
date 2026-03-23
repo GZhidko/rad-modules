@@ -59,6 +59,7 @@ int global_debug_flag; /* XXX */
 static const char *stats_file;
 static int stats_interval_min = 5;
 static int no_external;
+static const int recv_timeout_retries = 3;
 
 /*
  * FUNCTIONS
@@ -111,6 +112,30 @@ static uint32_t set_acknak(uint32_t *msgbuf, int acknack) {
 	msgbuf[4] = htonl(C_DI_INT); msgbuf[5] = htonl(4);
 	msgbuf[6] = acknack; /* XXX error recovery protocol */
 	return 7 << 2;
+}
+
+static int format_uam_request(char *dst, size_t dstsz, char **argv) {
+    size_t used = 0;
+    int i;
+
+    if (dstsz == 0) {
+      return 0;
+    }
+
+    dst[0] = '\0';
+    for (i = 0; argv[i] != NULL; i++) {
+      int written = snprintf(dst + used, dstsz - used,
+                             "%s\"%s\"",
+                             i == 0 ? "" : " ",
+                             argv[i]);
+      if (written < 0 || (size_t)written >= dstsz - used) {
+        used = dstsz - 1;
+        break;
+      }
+      used += (size_t)written;
+    }
+    dst[used] = '\0';
+    return (int)used;
 }
 
 int main(int argc, char **argv) {
@@ -293,33 +318,64 @@ int main(int argc, char **argv) {
           continue;
         }
 
-        if (sw_uam_send_msg(group, sw_argv) == -1) {
-          len = set_acknak(msgbuf, -1);
-          if (write(1, msgbuf, len) != len) {
-            perror("sweetgw: write");
-            exit(-1);
-          }
-          if (stats_pending) {
-            stats_c_record(&stats, stats_c_now_ms() - stats_start_ms);
-            stats_pending = 0;
-          }
-          continue;
-        }
+        {
+          int recv_attempt;
+          int recv_ok = 0;
+          int timed_out = 0;
+          char request_dump[2048];
 
-        if (debug)
-          msg("%s UAM query sent", func);
+          request_dump[0] = '\0';
+          format_uam_request(request_dump, sizeof(request_dump), sw_argv);
 
-        if (sw_uam_recv_msg(group, sw_argv) == -1) {
-          len = set_acknak(msgbuf, -1);
-          if (write(1, msgbuf, len) != len) {
-            perror("sweetgw: write");
-            exit(-1);
+          for (recv_attempt = 1; recv_attempt <= recv_timeout_retries; recv_attempt++) {
+            if (sw_uam_send_msg(group, sw_argv) == -1) {
+              len = set_acknak(msgbuf, -1);
+              if (write(1, msgbuf, len) != len) {
+                perror("sweetgw: write");
+                exit(-1);
+              }
+              if (stats_pending) {
+                stats_c_record(&stats, stats_c_now_ms() - stats_start_ms);
+                stats_pending = 0;
+              }
+              goto next_request;
+            }
+
+            if (debug)
+              msg("%s UAM query sent (attempt %d/%d)", func, recv_attempt, recv_timeout_retries);
+
+            errno = 0;
+            if (sw_uam_recv_msg(group, sw_argv) == 0) {
+              recv_ok = 1;
+              break;
+            }
+
+            if (errno == 0) {
+              timed_out = 1;
+              if (recv_attempt < recv_timeout_retries) {
+                msg("%s UAM response timeout on attempt %d/%d, retrying", func, recv_attempt, recv_timeout_retries);
+                continue;
+              }
+              msg("%s UAM response timeout after %d attempts, sending: %s", func, recv_timeout_retries, request_dump);
+            }
+            break;
           }
-          if (stats_pending) {
-            stats_c_record(&stats, stats_c_now_ms() - stats_start_ms);
-            stats_pending = 0;
+
+          if (!recv_ok) {
+            if (!timed_out && debug) {
+              msg("%s UAM response receive failed without timeout", func);
+            }
+            len = set_acknak(msgbuf, -1);
+            if (write(1, msgbuf, len) != len) {
+              perror("sweetgw: write");
+              exit(-1);
+            }
+            if (stats_pending) {
+              stats_c_record(&stats, stats_c_now_ms() - stats_start_ms);
+              stats_pending = 0;
+            }
+            continue;
           }
-          continue;
         }
 
         if (debug)
@@ -392,6 +448,8 @@ int main(int argc, char **argv) {
 
         if (debug)
           msg("%s %d-octets sent to radius core", func, m);
+next_request:
+        ;
     }
 
     sw_uam_destroy_client(group);

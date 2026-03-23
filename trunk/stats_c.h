@@ -43,9 +43,16 @@ static inline void stats_c_flush(stats_c_t *s, time_t now) {
     FILE *f = fopen(s->file, "a");
     if (f) {
         double avg = (double)s->total_ms / (double)s->count;
+        char ts_buf[32];
+        struct tm *tm_info = localtime(&now);
+        if (tm_info) {
+            strftime(ts_buf, sizeof(ts_buf), "%Y-%m-%d %H:%M:%S", tm_info);
+        } else {
+            snprintf(ts_buf, sizeof(ts_buf), "%ld", (long)now);
+        }
         fprintf(f,
-                "{\"ts\":%ld,\"module\":\"%s\",\"pid\":%ld,\"interval_sec\":%d,\"count\":%llu,\"total_ms\":%llu,\"min_ms\":%llu,\"max_ms\":%llu,\"avg_ms\":%.3f}\n",
-                (long)now,
+                "{\"time\":\"%s\",\"module\":\"%s\",\"pid\":%ld,\"interval_sec\":%d,\"count\":%llu,\"total_ms\":%llu,\"min_ms\":%llu,\"max_ms\":%llu,\"avg_ms\":%.3f}\n",
+                ts_buf,
                 s->module ? s->module : "",
                 (long)getpid(),
                 s->interval_sec,
