@@ -321,7 +321,6 @@ int main(int argc, char **argv) {
         {
           int recv_attempt;
           int recv_ok = 0;
-          int timed_out = 0;
           char request_dump[2048];
 
           request_dump[0] = '\0';
@@ -344,27 +343,21 @@ int main(int argc, char **argv) {
             if (debug)
               msg("%s UAM query sent (attempt %d/%d)", func, recv_attempt, recv_timeout_retries);
 
-            errno = 0;
             if (sw_uam_recv_msg(group, sw_argv) == 0) {
               recv_ok = 1;
               break;
             }
 
-            if (errno == 0) {
-              timed_out = 1;
-              if (recv_attempt < recv_timeout_retries) {
-                msg("%s UAM response timeout on attempt %d/%d, retrying", func, recv_attempt, recv_timeout_retries);
-                continue;
-              }
-              msg("%s UAM response timeout after %d attempts, sending: %s", func, recv_timeout_retries, request_dump);
+            if (recv_attempt < recv_timeout_retries) {
+              msg("%s UAM response receive failed on attempt %d/%d, retrying", func, recv_attempt, recv_timeout_retries);
+              continue;
             }
+
+            msg("%s UAM response receive failed after %d attempts, sending: %s", func, recv_timeout_retries, request_dump);
             break;
           }
 
           if (!recv_ok) {
-            if (!timed_out && debug) {
-              msg("%s UAM response receive failed without timeout", func);
-            }
             len = set_acknak(msgbuf, -1);
             if (write(1, msgbuf, len) != len) {
               perror("sweetgw: write");
