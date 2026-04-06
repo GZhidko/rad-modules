@@ -100,6 +100,28 @@ static void msg(va_alist) va_dcl {
     exit(-1);
 }
 
+static void format_uam_request(char *buf, size_t buflen, char **argv) {
+  size_t used = 0;
+  int idx;
+
+  if (!buflen) return;
+  buf[0] = '\0';
+
+  for (idx = 0; argv[idx]; idx++) {
+    int n = snprintf(buf + used, buflen - used, "%s%s",
+                     idx ? " " : "", argv[idx]);
+    if (n < 0) {
+      buf[0] = '\0';
+      return;
+    }
+    if ((size_t)n >= buflen - used) {
+      used = buflen - 1;
+      break;
+    }
+    used += (size_t)n;
+  }
+}
+
 static uint32_t set_acknak(uint32_t *msgbuf, int acknack) {
     static const char *func = "get_val_by_name():";
     if (debug) {
@@ -310,6 +332,9 @@ int main(int argc, char **argv) {
           msg("%s UAM query sent", func);
 
         if (sw_uam_recv_msg(group, sw_argv) == -1) {
+          char request_dump[2048];
+          format_uam_request(request_dump, sizeof(request_dump), sw_argv);
+          msg("%s UAM response receive failed, sending: %s", func, request_dump);
           len = set_acknak(msgbuf, -1);
           if (write(1, msgbuf, len) != len) {
             perror("sweetgw: write");
