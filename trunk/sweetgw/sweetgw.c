@@ -144,6 +144,7 @@ int main(int argc, char **argv) {
     int avpair_idx;
     int n, m, idx, sw_argc;
     char *sw_argv[SW_UAM_ARG_MAX];
+    char request_dump[2048];
     /*
     ** Individual args may be quite large, the only limit is UAM message 
     ** size, which is checked elsewhere. Therefore we practically put no 
@@ -283,6 +284,7 @@ int main(int argc, char **argv) {
         }
 
         sw_argv[sw_argc++] = NULL;
+        format_uam_request(request_dump, sizeof(request_dump), sw_argv);
 
         if (debug)
           msg("%s built %d-element UAM vector", func, sw_argc);
@@ -309,7 +311,7 @@ int main(int argc, char **argv) {
             exit(-1);
           }
           if (stats_pending) {
-            stats_c_record(&stats, stats_c_now_ms() - stats_start_ms);
+            stats_c_record_ex(&stats, stats_c_now_ms() - stats_start_ms, request_dump);
             stats_pending = 0;
           }
           continue;
@@ -322,7 +324,7 @@ int main(int argc, char **argv) {
             exit(-1);
           }
           if (stats_pending) {
-            stats_c_record(&stats, stats_c_now_ms() - stats_start_ms);
+            stats_c_record_ex(&stats, stats_c_now_ms() - stats_start_ms, request_dump);
             stats_pending = 0;
           }
           continue;
@@ -332,8 +334,6 @@ int main(int argc, char **argv) {
           msg("%s UAM query sent", func);
 
         if (sw_uam_recv_msg(group, sw_argv) == -1) {
-          char request_dump[2048];
-          format_uam_request(request_dump, sizeof(request_dump), sw_argv);
           msg("%s UAM response receive failed, sending: %s", func, request_dump);
           len = set_acknak(msgbuf, -1);
           if (write(1, msgbuf, len) != len) {
@@ -341,7 +341,7 @@ int main(int argc, char **argv) {
             exit(-1);
           }
           if (stats_pending) {
-            stats_c_record(&stats, stats_c_now_ms() - stats_start_ms);
+            stats_c_record_ex(&stats, stats_c_now_ms() - stats_start_ms, request_dump);
             stats_pending = 0;
           }
           continue;
@@ -358,7 +358,7 @@ int main(int argc, char **argv) {
             exit(-1);
           }
           if (stats_pending) {
-            stats_c_record(&stats, stats_c_now_ms() - stats_start_ms);
+            stats_c_record_ex(&stats, stats_c_now_ms() - stats_start_ms, request_dump);
             stats_pending = 0;
           }
           continue;
@@ -372,7 +372,7 @@ int main(int argc, char **argv) {
             exit(-1);
           }
           if (stats_pending) {
-            stats_c_record(&stats, stats_c_now_ms() - stats_start_ms);
+            stats_c_record_ex(&stats, stats_c_now_ms() - stats_start_ms, request_dump);
             stats_pending = 0;
           }
           exit(-1);
@@ -411,7 +411,7 @@ int main(int argc, char **argv) {
           exit(-1);
         }
         if (stats_pending) {
-          stats_c_record(&stats, stats_c_now_ms() - stats_start_ms);
+          stats_c_record_ex(&stats, stats_c_now_ms() - stats_start_ms, request_dump);
           stats_pending = 0;
         }
 
