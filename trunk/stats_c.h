@@ -19,6 +19,7 @@ typedef struct stats_c {
     double mean_ms;
     double m2_ms;
     int outlier_active;
+    uint64_t outlier_count;
 } stats_c_t;
 
 #define STATS_C_OUTLIER_MIN_COUNT 100
@@ -119,6 +120,7 @@ static inline void stats_c_init(stats_c_t *s, const char *module, const char *fi
     s->mean_ms = 0.0;
     s->m2_ms = 0.0;
     s->outlier_active = 0;
+    s->outlier_count = 0;
 }
 
 static inline void stats_c_flush(stats_c_t *s, time_t now) {
@@ -129,10 +131,11 @@ static inline void stats_c_flush(stats_c_t *s, time_t now) {
     FILE *f = fopen(s->file, "a");
     if (f) {
         double avg = (double)s->total_ms / (double)s->count;
+        double outlier_pct = s->count ? (100.0 * (double)s->outlier_count / (double)s->count) : 0.0;
         char ts_buf[32];
         stats_c_format_time(ts_buf, sizeof(ts_buf), now);
         fprintf(f,
-                "{\"time\":\"%s\",\"module\":\"%s\",\"pid\":%ld,\"interval_sec\":%d,\"count\":%llu,\"total_ms\":%llu,\"min_ms\":%llu,\"max_ms\":%llu,\"avg_ms\":%.3f}\n",
+                "{\"time\":\"%s\",\"module\":\"%s\",\"pid\":%ld,\"interval_sec\":%d,\"count\":%llu,\"total_ms\":%llu,\"min_ms\":%llu,\"max_ms\":%llu,\"avg_ms\":%.3f,\"outlier_count\":%llu,\"outlier_pct\":%.3f}\n",
                 ts_buf,
                 s->module ? s->module : "",
                 (long)getpid(),
@@ -141,7 +144,9 @@ static inline void stats_c_flush(stats_c_t *s, time_t now) {
                 (unsigned long long)s->total_ms,
                 (unsigned long long)s->min_ms,
                 (unsigned long long)s->max_ms,
-                avg);
+                avg,
+                (unsigned long long)s->outlier_count,
+                outlier_pct);
         fclose(f);
     }
     s->count = 0;
@@ -151,6 +156,7 @@ static inline void stats_c_flush(stats_c_t *s, time_t now) {
     s->mean_ms = 0.0;
     s->m2_ms = 0.0;
     s->outlier_active = 0;
+    s->outlier_count = 0;
     s->last = now;
 }
 
@@ -174,6 +180,7 @@ static inline void stats_c_record_ex(stats_c_t *s, uint64_t ms,
         sigma_before = stats_c_sqrt(s->m2_ms / (double)(s->count - 1));
         threshold = mean_before + 3.0 * sigma_before;
         if ((double)ms > threshold) {
+            s->outlier_count++;
             if (!s->outlier_active) {
                 stats_c_log_outlier(s, now, ms, mean_before, sigma_before, detail);
                 s->outlier_active = 1;
