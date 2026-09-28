@@ -6,6 +6,9 @@
 Counter for id
 */
 int cid;
+time_t global_timestamp;
+int syntax_error;
+statistic stat;
 static stats_c_t stats;
 
 void print_packet(attr *out) {

@@ -1,14 +1,39 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Solaris toolchain paths (OpenCSW + system tools)
+# Solaris toolchain paths (OpenCSW + system tools). They are harmless on Linux
+# and keep the script usable on the original build hosts.
 export PATH="/opt/csw/bin:/usr/gnu/bin:/usr/sfw/bin:/usr/ccs/bin:/usr/bin:${PATH}"
 
-if ! command -v gmake >/dev/null 2>&1; then
-  echo "ERROR: gmake not found in PATH"
+if command -v gmake >/dev/null 2>&1; then
+  MAKE_BIN=gmake
+elif command -v make >/dev/null 2>&1; then
+  MAKE_BIN=make
+else
+  echo "ERROR: neither gmake nor make found in PATH"
   exit 1
 fi
-MAKE_BIN=gmake
+
+OS_NAME="$(uname -s)"
+case "${OS_NAME}" in
+  SunOS)
+    RPATH_FLAG="-R"
+    EXTRA_NET_LIBS="-lsocket -lnsl"
+    ;;
+  Linux)
+    RPATH_FLAG="-Wl,-rpath,"
+    EXTRA_NET_LIBS=""
+    ;;
+  *)
+    RPATH_FLAG="-Wl,-rpath,"
+    EXTRA_NET_LIBS=""
+    ;;
+esac
+
+with_rpath() {
+  local lib_dir="$1"
+  printf -- "-L%s %s%s" "${lib_dir}" "${RPATH_FLAG}" "${lib_dir}"
+}
 
 OPENRADIUS_SRC="${OPENRADIUS_SRC:-/export/home/tt/packaging/openradius-0.9.12c}"
 SWEETSPOT_SRC="${SWEETSPOT_SRC:-/export/home/tt/openradius-stuff/sweetspot/src}"
@@ -32,7 +57,7 @@ build_absgw() {
   if [ -f "${OPENRADIUS_SRC}/common/constants.h" ]; then
     cd absgw
     sh ./autogen.sh
-    LDFLAGS="-L${ABSWARE_LIB} -R${ABSWARE_LIB}" \
+    LDFLAGS="$(with_rpath "${ABSWARE_LIB}")" \
     ./configure --with-openradius-source-dir="${OPENRADIUS_SRC}" --with-absware-include-dir="${ABSWARE_INCLUDE}"
     "$MAKE_BIN"
     cd ..
@@ -53,7 +78,7 @@ build_sweetgw() {
   fi
   cd sweetgw
   sh ./autogen.sh
-  LDFLAGS="-L${ABSWARE_LIB} -R${ABSWARE_LIB}" \
+  LDFLAGS="$(with_rpath "${ABSWARE_LIB}")" \
   ./configure --with-openradius-source-dir="${OPENRADIUS_SRC}" --with-sweetspot-source-dir="${SWEETSPOT_SRC}"
   "$MAKE_BIN"
   cd ..
@@ -80,8 +105,8 @@ build_redisgw() {
   cd redisgw
   sh ./autogen.sh
   CPPFLAGS="-I${HIREDIS_INCLUDE}" \
-  LDFLAGS="-L${HIREDIS_LIB} -R${HIREDIS_LIB}" \
-  LIBS="${hiredis_link} -lsocket -lnsl" \
+  LDFLAGS="$(with_rpath "${HIREDIS_LIB}")" \
+  LIBS="${hiredis_link} ${EXTRA_NET_LIBS}" \
   ./configure
   "$MAKE_BIN"
   cd ..

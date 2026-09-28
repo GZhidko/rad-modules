@@ -12,8 +12,8 @@ if (result == 0) \
       result = YY_NULL; \
 }\
 
-char *mmbuf;
-int flag;
+static char *mmbuf;
+static int flag;
 extern int line;
 %}
 

@@ -1,6 +1,17 @@
 #include "args.h"
 #include <stdlib.h>
 
+int exp_time;
+int stat_time;
+char *stats_file;
+int stats_interval_min;
+char prog[128];
+char package_name[64];
+char package_version[64];
+char package_bugreport[64];
+int num_rclnt;
+char **args;
+
 int process_args(int argc, char *argv[]) {
     int i, j;
     int q;

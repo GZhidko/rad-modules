@@ -4,12 +4,12 @@
 
 #define YYSTYPE char*
 
-attr *out, *p, *tmp;
-int n;
-int flag;
-char acc[1024];
+static attr *out, *p, *tmp;
+static int n;
+static int flag;
+static char acc[1024];
 int line;
-char *procn;
+static char *procn;
 
 void init_output(attr*, char*);
 void append(char*);

@@ -38,8 +38,8 @@ typedef struct statistic_t {
     int time;
 } statistic;
 
-time_t global_timestamp;
-int syntax_error;
-statistic stat;
+extern time_t global_timestamp;
+extern int syntax_error;
+extern statistic stat;
 
 #endif /* __COMMON_H */

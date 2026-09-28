@@ -85,7 +85,11 @@ void universal_write(char * mode, char * fmt, va_list ap)
     
     stamp = time(&stamp);
     localtime_r(&stamp, &stamp_tm);
+#ifdef __sun
     asctime_r(&stamp_tm, stamp_buff, sizeof(stamp_buff));
+#else
+    asctime_r(&stamp_tm, stamp_buff);
+#endif
     stamp_buff[24] = '\0';
     
     vsnprintf(s, BUFF_SIZE, fmt, ap);
