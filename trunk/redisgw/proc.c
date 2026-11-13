@@ -49,7 +49,7 @@ void processor_append(input_params_ctx *ctx, eater_ctx *c) {
 }
 
 void processor_pop(input_params_ctx *ctx, 
-                   int *argc, char ***argv, int **argvlen) {
+                   int *argc, char ***argv, size_t **argvlen) {
   *argv = ctx->argv;
   *argc = ctx->argc;
   *argvlen = ctx->argvlen;

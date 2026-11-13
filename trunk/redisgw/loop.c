@@ -43,7 +43,8 @@ void main_loop(char *hostname, int port, int timeout, char *bootfile) {
     char *b;
     int n, a;
     char **argv, *rsp;
-    int argc, *argvlen;
+    int argc;
+    size_t *argvlen;
     char debug[4000];
     stats_c_t stats;
     stats_c_init(&stats, "redisgw", stats_file, stats_interval_min);
@@ -56,7 +57,8 @@ void main_loop(char *hostname, int port, int timeout, char *bootfile) {
     
     if (bootfile) {
       char *s, *e;
-      int argvlenbuf[512], argvbuf[512];
+      size_t argvlenbuf[512];
+      char *argvbuf[512];
       int bf, rc, next_line;
 
       bf = open(bootfile, O_RDONLY);
@@ -80,25 +82,29 @@ void main_loop(char *hostname, int port, int timeout, char *bootfile) {
 
       argc = 0;
       s = e = ibuff;
-      argv = (char **)&argvbuf;
-      argvlen = (int *)&argvlenbuf;
+      argv = argvbuf;
+      argvlen = argvlenbuf;
       while(*e) {
         if (*e == '\n') {
           *e = '\0';
-          argv[argc] = s;
-          argvlen[argc] = strlen(s);
           e++;
-          s = e;
-          if (argvlen[argc]) {
+          if (*s) {
+            if (argc >= (int)(sizeof(argvbuf) / sizeof(argvbuf[0]))) {
+              write_error("too many arguments in redis boot file %s", bootfile);
+              exit(1);
+            }
+            argv[argc] = s;
+            argvlen[argc] = strlen(s);
             write_debug("collected arg #%d: %s", argc, argv[argc]);
             argc++;
-          } else {
+          } else if (argc) {
             write_debug("calling redis server");
             redis_process(&rctx, argc, argv, argvlen,
                           obuff, sizeof(obuff));
             write_info("redis initialization response: %s", obuff);
             argc = 0;
           }
+          s = e;
         } else {
           e++;
         }

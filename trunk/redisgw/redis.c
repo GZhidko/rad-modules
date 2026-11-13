@@ -27,9 +27,9 @@ void redis_process(redis_ctx *rctx, int argc, char **argv, size_t argvlen[],
                   char *obuff, size_t obufflen) {
     redisReply *reply;
 
-    reply = redisCommandArgv(rctx->native, argc, (const char **)argv, (const size_t *)argvlen);
+    reply = redisCommandArgv(rctx->native, argc, (const char **)argv, argvlen);
     if (!reply) {
-        write_error("redis error: %s", reply->str);
+        write_error("redis error: %s", rctx->native->errstr);
         exit(1);
     }
 
@@ -44,7 +44,7 @@ void redis_process(redis_ctx *rctx, int argc, char **argv, size_t argvlen[],
       snprintf(obuff, obufflen, "str=\"%s\"\nint=0\n\n", reply->str);
       break;
     case REDIS_REPLY_INTEGER:
-      snprintf(obuff, obufflen, "str=\"%li\"\nint=0\n\n", reply->integer);
+      snprintf(obuff, obufflen, "str=\"%lld\"\nint=0\n\n", reply->integer);
       break;
     default:
       write_warning("unknown redis type in response %i", reply->type);

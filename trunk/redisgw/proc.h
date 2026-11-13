@@ -1,6 +1,8 @@
 #ifndef __PROC_H
 #define __PROC_H
 
+#include <stddef.h>
+
 #include "parse.h"
 #include "proc.h"
 
@@ -11,11 +13,11 @@
 typedef struct input_params_ {
     char *argv[PARAMS_NUMBER];
     int argc;
-    int argvlen[PARAMS_NUMBER];
+    size_t argvlen[PARAMS_NUMBER];
 } input_params_ctx;
 
 void processor_init(input_params_ctx * ctx);
 void processor_append(input_params_ctx * ctx, eater_ctx * c);
-void processor_pop(input_params_ctx * ctx, int *argc, char ***argv, int **argvlen);
+void processor_pop(input_params_ctx * ctx, int *argc, char ***argv, size_t **argvlen);
 
 #endif
